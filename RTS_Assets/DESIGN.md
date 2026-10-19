@@ -56,7 +56,7 @@ and engineers can dig them out or build a ramp.
 - v1 rigged soldier in both team colors, saber, revolver, bronze field cannon. See `README.md`.
 - Sapper (engineer) in both team colors, shovel, pickaxe, sandbag prop. Shares the soldier skeleton.
 - Skeleton uses UE5 mannequin bone names for retargeting. Rigid skinning (upgrade later).
-- 2D concept art (Gemini): `Concept/meridian_federation_lineup.webp` (full roster) and `Concept/meridian_unit_select_mockup.webp` (Commander, Sapper, Crank-Gun Gunner on a unit-select screen). Use as reference for models and UI.
+- 2D concept art (Gemini): `Concept/meridian_federation_lineup.webp` (full roster) and `Concept/meridian_unit_select_mockup.webp` (Commander, Sapper, Crank-Gun Gunner on a unit-select screen). Use as reference for models and UI. `Concept/meridian_turntable_video.mp4` is an AI video of the same three: the target art style.
 
 ## Next up (pick one)
 
