@@ -55,7 +55,7 @@ and engineers can dig them out or build a ramp.
 
 - v1 rigged soldier in both team colors, saber, revolver, bronze field cannon. See `README.md`.
 - Skeleton uses UE5 mannequin bone names for retargeting. Rigid skinning (upgrade later).
-- 2D concept art: JJ is generating faction sheets and squad art with Gemini from prompts Claude wrote.
+- 2D concept art: `Concept/meridian_federation_lineup.webp` (Gemini). Use as reference for models.
 
 ## Next up (pick one)
 
