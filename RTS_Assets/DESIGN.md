@@ -55,7 +55,7 @@ and engineers can dig them out or build a ramp.
 
 - v1 rigged soldier in both team colors, saber, revolver, bronze field cannon. See `README.md`.
 - Skeleton uses UE5 mannequin bone names for retargeting. Rigid skinning (upgrade later).
-- 2D concept art: `Concept/meridian_federation_lineup.webp` (Gemini). Use as reference for models.
+- 2D concept art (Gemini): `Concept/meridian_federation_lineup.webp` (full roster) and `Concept/meridian_unit_select_mockup.webp` (Commander, Sapper, Crank-Gun Gunner on a unit-select screen). Use as reference for models and UI.
 
 ## Next up (pick one)
 
