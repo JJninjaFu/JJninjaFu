@@ -54,12 +54,12 @@ and engineers can dig them out or build a ramp.
 ## Assets so far (this folder)
 
 - v1 rigged soldier in both team colors, saber, revolver, bronze field cannon. See `README.md`.
+- Sapper (engineer) in both team colors, shovel, pickaxe, sandbag prop. Shares the soldier skeleton.
 - Skeleton uses UE5 mannequin bone names for retargeting. Rigid skinning (upgrade later).
 - 2D concept art (Gemini): `Concept/meridian_federation_lineup.webp` (full roster) and `Concept/meridian_unit_select_mockup.webp` (Commander, Sapper, Crank-Gun Gunner on a unit-select screen). Use as reference for models and UI.
 
 ## Next up (pick one)
 
 - Mortar and crank gun models (capturable weapons)
-- Engineer with a shovel
 - Better skinned base body
 - Push the Unreal project to GitHub so cloud sessions can work on squads and capture code
