@@ -65,7 +65,9 @@ and engineers can dig them out or build a ramp.
    Make sure the model shows colors before downloading: a file ending in `_generate` is the untextured shape.
 3. `scripts/rig_meshy.py <in.glb> <out_dir> <Name>` reduces it, scales it to 180 cm, fits our UE5-named
    skeleton and binds it. Tested on the untextured Meshy Sapper: works (`Previews/meshy_sapper_rig_test.png`).
-4. Still to do: rig the textured Sapper, Commander and Gunner, then the Ashfall (grey/crimson) versions.
+   Commander and Gunner also rigged (`Previews/meshy_gunner_commander_rig_test.png`).
+   Untextured rigged test FBXs: `Models/Meshy/SK_{Sapper,Gunner,Commander}_Meshy.fbx`.
+4. Still to do: get the **textured** downloads from Meshy and rerun the script, then the Ashfall (grey/crimson) versions.
 
 ## Next up (pick one)
 
