@@ -58,6 +58,15 @@ and engineers can dig them out or build a ramp.
 - Skeleton uses UE5 mannequin bone names for retargeting. Rigid skinning (upgrade later).
 - 2D concept art (Gemini): `Concept/meridian_federation_lineup.webp` (full roster) and `Concept/meridian_unit_select_mockup.webp` (Commander, Sapper, Crank-Gun Gunner on a unit-select screen). Use as reference for models and UI. `Concept/meridian_turntable_video.mp4` is an AI video of the same three: the target art style. `Concept/apose_*.jpg` are clean front A-pose images of the Gunner, Sapper and Commander, made as image-to-3D input.
 
+## Image-to-3D pipeline (in progress)
+
+1. Gemini makes a clean front A-pose image (see `Concept/apose_*.jpg`).
+2. Meshy (free tier, Meshy 6 Lite, about 15k triangles) turns it into a textured `.glb`.
+   Make sure the model shows colors before downloading: a file ending in `_generate` is the untextured shape.
+3. `scripts/rig_meshy.py <in.glb> <out_dir> <Name>` reduces it, scales it to 180 cm, fits our UE5-named
+   skeleton and binds it. Tested on the untextured Meshy Sapper: works (`Previews/meshy_sapper_rig_test.png`).
+4. Still to do: rig the textured Sapper, Commander and Gunner, then the Ashfall (grey/crimson) versions.
+
 ## Next up (pick one)
 
 - Mortar and crank gun models (capturable weapons)
