@@ -71,6 +71,8 @@ and engineers can dig them out or build a ramp.
    image, edge colors bled outward, back of the head gets solid hair/cap colors). Then rig_meshy.py rigs it.
    **Done:** textured + rigged `Models/Meshy/SK_{Sapper,Gunner,Commander}.fbx` (+ .glb), previews
    `Previews/meshy_*_textured.png`. Known limit: backs mirror front details (buttons, apron).
+   **Commander now uses Meshy's own texture** (downloaded as `..._texture.glb`, proper back): `Previews/meshy_commander_meshytex.png`.
+   Sapper and Gunner still use the projected texture until their Meshy-textured files arrive.
 5. Still to do: Ashfall (grey/crimson) versions, a back-view image per character to fix the backs.
 
 ## Next up (pick one)
