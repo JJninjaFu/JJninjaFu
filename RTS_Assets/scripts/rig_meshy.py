@@ -42,6 +42,12 @@ hi = Vector((max(v.x for v in vs), max(v.y for v in vs), max(v.z for v in vs)))
 s = HEIGHT / (hi.z - lo.z)
 body.data.transform(Matrix.Scale(s, 4) @ Matrix.Translation((-(lo.x + hi.x) / 2, -(lo.y + hi.y) / 2, -lo.z)))
 body.data.update()
+# Textured exports split vertices along UV seams; weld them so automatic weights can work.
+bm = bmesh.new()
+bm.from_mesh(body.data)
+bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.01)
+bm.to_mesh(body.data)
+bm.free()
 
 tris = sum(len(p.vertices) - 2 for p in body.data.polygons)
 if tris > TRIS:
@@ -179,4 +185,6 @@ if RENDER:
     render(os.path.join(OUT, "Previews", f"{NAME}_rig_test_front.png"))
     camera((420, -160, 140), (0, 0, 90), 40)
     render(os.path.join(OUT, "Previews", f"{NAME}_rig_test_side.png"))
+    camera((-60, 420, 150), (0, 0, 90), 40)
+    render(os.path.join(OUT, "Previews", f"{NAME}_rig_test_back.png"))
 print("done")

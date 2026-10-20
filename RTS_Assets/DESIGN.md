@@ -66,8 +66,12 @@ and engineers can dig them out or build a ramp.
 3. `scripts/rig_meshy.py <in.glb> <out_dir> <Name>` reduces it, scales it to 180 cm, fits our UE5-named
    skeleton and binds it. Tested on the untextured Meshy Sapper: works (`Previews/meshy_sapper_rig_test.png`).
    Commander and Gunner also rigged (`Previews/meshy_gunner_commander_rig_test.png`).
-   Untextured rigged test FBXs: `Models/Meshy/SK_{Sapper,Gunner,Commander}_Meshy.fbx`.
-4. Still to do: get the **textured** downloads from Meshy and rerun the script, then the Ashfall (grey/crimson) versions.
+4. Meshy's free tier would not give textured downloads, so `scripts/texture_project.py <in.glb> <front_image> <out.glb>`
+   projects the A-pose image onto the mesh from the front and bakes a 2048 texture (arms are re-aligned to the
+   image, edge colors bled outward, back of the head gets solid hair/cap colors). Then rig_meshy.py rigs it.
+   **Done:** textured + rigged `Models/Meshy/SK_{Sapper,Gunner,Commander}.fbx` (+ .glb), previews
+   `Previews/meshy_*_textured.png`. Known limit: backs mirror front details (buttons, apron).
+5. Still to do: Ashfall (grey/crimson) versions, a back-view image per character to fix the backs.
 
 ## Next up (pick one)
 
