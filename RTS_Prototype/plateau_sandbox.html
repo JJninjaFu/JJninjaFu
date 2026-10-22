@@ -39,6 +39,7 @@ select { background: #232a34; border: 1px solid var(--line); border-radius: 6px;
 .brand { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px 7px; }
 .brand h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 21px; line-height: 1.1; color: var(--brass); letter-spacing: 0.02em; }
 .brand .sub { font-size: 12px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+.brand .perf { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px; }
 .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
 .seg { display: inline-flex; gap: 2px; }
 .seg button { border-radius: 4px; padding: 7px 9px; }
@@ -100,6 +101,7 @@ table.rep td.n { text-align: right; }
     <div class="brand">
       <h1>Plateau Sandbox</h1>
       <div class="sub">Meridian vs Grey Coats · field test</div>
+      <div class="perf" id="perf">measuring…</div>
     </div>
     <div class="controls">
       <div class="seg" id="speedSeg" role="group" aria-label="Game speed">
@@ -119,6 +121,7 @@ table.rep td.n { text-align: right; }
       <button id="btnSpawn" data-drawer="spawn">Spawn</button>
       <button id="btnTune" data-drawer="tune">Tune</button>
       <button id="btnReport" data-drawer="report">Report</button>
+      <button id="sndBtn" aria-pressed="true">Sound on</button>
       <button id="btnHelp" data-drawer="help" aria-label="Controls">Controls</button>
     </div>
   </header>
@@ -159,15 +162,16 @@ const DEFAULT_TYPES = {
   cannon:    { name: 'Field Gun',          tag: 'CAN', men: 4, hp: 100, speed: 2.0, range: 85, damage: 120, accuracy: 0.75, reload: 9,    suppress: 0, splash: 3.5, gun: 'cannon' },
   cavalry:   { name: 'Iron Horse Cavalry', tag: 'CAV', men: 4, hp: 160, speed: 7.5, range: 2.8, damage: 32, accuracy: 0.6,  reload: 1.8,  suppress: 8, aura: 16 },
   commander: { name: 'Command Staff',      tag: 'CMD', men: 3, hp: 110, speed: 3.4, range: 18, damage: 22,  accuracy: 0.45, reload: 3,    suppress: 3, aura: 22 },
+  hover:     { name: 'Hover Skiff',        tag: 'SKF', men: 1, hp: 700, speed: 9,   range: 0,  damage: 0,   accuracy: 0,    reload: 1,    suppress: 0, carry: 10, armor: 0.35, vehicle: true },
 };
-const DEFAULT_WORLD = { repairRate: 1.2, rampRate: 1.6, maxSlope: 0.9, craterScale: 1, craterDepth: 1.3, baseRadius: 14, baseMinDamage: 0.15 };
-const TYPE_ORDER = ['rifle', 'sapper', 'crank', 'mortar', 'cannon', 'cavalry', 'commander'];
+const DEFAULT_WORLD = { repairRate: 1.2, rampRate: 1.6, maxSlope: 0.9, craterScale: 1, craterDepth: 1.3, baseRadius: 20, baseMinDamage: 0.15 };
+const TYPE_ORDER = ['rifle', 'sapper', 'crank', 'mortar', 'cannon', 'cavalry', 'commander', 'hover'];
 const UNIT_FIELDS = [
   ['men', 'Men per squad (new squads)', 1, 9, 1], ['hp', 'Health per man (new squads)', 20, 400, 5],
   ['speed', 'Speed, m/s', 0.5, 12, 0.1], ['range', 'Range, m', 2, 120, 1], ['damage', 'Damage per hit', 1, 250, 1],
   ['accuracy', 'Accuracy', 0.02, 1, 0.01], ['reload', 'Reload, seconds', 0.05, 15, 0.05], ['suppress', 'Morale hit per shot', 0, 20, 0.5],
 ];
-const EXTRA_FIELDS = { splash: ['splash', 'Blast radius, m', 1, 12, 0.5], aura: ['aura', 'Aura radius, m', 0, 50, 1] };
+const EXTRA_FIELDS = { splash: ['splash', 'Blast radius, m', 1, 12, 0.5], aura: ['aura', 'Aura radius, m', 0, 50, 1], carry: ['carry', 'Passenger seats', 2, 20, 1], armor: ['armor', 'Small-arms damage taken (armor)', 0.05, 1, 0.05] };
 const WORLD_FIELDS = [
   ['repairRate', 'Crater repair, m³ per sapper per second', 0.1, 6, 0.1],
   ['rampRate', 'Ramp building, m³ per sapper per second', 0.1, 6, 0.1],
@@ -179,7 +183,7 @@ const WORLD_FIELDS = [
 ];
 const TYPES = JSON.parse(JSON.stringify(DEFAULT_TYPES));
 const WORLD = Object.assign({}, DEFAULT_WORLD);
-const STORE_KEY = 'plateauSandbox.tune.v1';
+const STORE_KEY = 'plateauSandbox.tune.v2';
 try {
   const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
   if (saved) {
@@ -196,7 +200,7 @@ const TEAM = {
 const ENEMY = { blue: 'grey', grey: 'blue' };
 
 // =============================================================== terrain
-const SIZE = 160, N = 129, CELL = SIZE / (N - 1), HALF = SIZE / 2, BED = -3;
+const SIZE = 320, N = 257, CELL = SIZE / (N - 1), HALF = SIZE / 2, BED = -3;
 const H = new Float32Array(N * N), H0 = new Float32Array(N * N);
 const I = (i, j) => j * N + i;
 const gx = x => (x + HALF) / CELL;
@@ -212,24 +216,24 @@ function segProj(px, pz, ax, az, bx, bz) {
   const cx = ax + dx * clamp(t, 0, 1), cz = az + dz * clamp(t, 0, 1);
   return { t, d: Math.hypot(px - cx, pz - cz) };
 }
-const BASES = { blue: { x: 0, z: -64 }, grey: { x: 0, z: 64 } };
+const BASES = { blue: { x: 0, z: -128 }, grey: { x: 0, z: 128 } };
 const PLATEAUS = [
-  { x: -40, z: 6, r: 15, h: 11, ramp: [-40, -34, -40, -11] },
-  { x: 40, z: -6, r: 15, h: 11 },
+  { x: -80, z: 12, r: 26, h: 14, ramp: [-80, -66, -80, -15] },
+  { x: 80, z: -12, r: 26, h: 14 },
 ];
-const MOUNDS = [[0, 0, 7, 2.2], [-14, -26, 5, 1.4], [16, 24, 5, 1.4], [-62, -40, 8, 2], [62, 40, 8, 2], [24, -34, 4, 1.2], [-22, 32, 4, 1.2]];
+const MOUNDS = [[0, 0, 11, 2.6], [-28, -52, 8, 1.6], [32, 48, 8, 1.6], [-124, -80, 13, 2.4], [124, 80, 13, 2.4], [48, -68, 6, 1.4], [-44, 64, 6, 1.4], [-38, -12, 9, 1.8], [38, 12, 9, 1.8], [0, -70, 7, 1.2], [0, 70, 7, 1.2]];
 function genTerrain() {
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const x = wx(i), z = wx(j);
-    let h = 0.7 * Math.sin(x * 0.06 + 0.4) * Math.cos(z * 0.05) + 0.45 * Math.sin(x * 0.13 + 1.3) * Math.sin(z * 0.09 + 0.2) + 0.35 * Math.cos(z * 0.12 + x * 0.04);
+    let h = 1.0 * Math.sin(x * 0.03 + 0.4) * Math.cos(z * 0.025) + 0.55 * Math.sin(x * 0.065 + 1.3) * Math.sin(z * 0.045 + 0.2) + 0.35 * Math.cos(z * 0.06 + x * 0.02);
     for (const [mx, mz, mr, mh] of MOUNDS) { const d = Math.hypot(x - mx, z - mz); h += mh * Math.exp(-(d * d) / (mr * mr)); }
-    for (const B of Object.values(BASES)) h = lerp(h, 0.2, smooth(20, 12, Math.hypot(x - B.x, z - B.z)));
+    for (const B of Object.values(BASES)) h = lerp(h, 0.2, smooth(32, 20, Math.hypot(x - B.x, z - B.z)));
     for (const P of PLATEAUS) {
       const d = Math.hypot(x - P.x, z - P.z);
-      h = lerp(h, P.h + 0.25 * Math.sin(x * 0.5) * Math.cos(z * 0.4), smooth(P.r + 3.5, P.r, d));
+      h = lerp(h, P.h + 0.3 * Math.sin(x * 0.35) * Math.cos(z * 0.3), smooth(P.r + 4.5, P.r, d));
       if (P.ramp) {
         const [ax, az, bx, bz] = P.ramp, s = segProj(x, z, ax, az, bx, bz);
-        if (s.t >= -0.02 && s.t <= 1.1) h = Math.max(h, lerp(h, P.h * clamp(s.t, 0, 1), smooth(4.5, 2.5, s.d)));
+        if (s.t >= -0.02 && s.t <= 1.1) h = Math.max(h, lerp(h, P.h * clamp(s.t, 0, 1), smooth(6.5, 3.5, s.d)));
       }
     }
     H[I(i, j)] = H0[I(i, j)] = h;
@@ -243,8 +247,8 @@ const renderer = new THREE.WebGLRenderer({ canvas: glCanvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa9b7bd);
-scene.fog = new THREE.Fog(0xa9b7bd, 150, 380);
-const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 900);
+scene.fog = new THREE.Fog(0xa9b7bd, 260, 700);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 1600);
 scene.add(new THREE.HemisphereLight(0xe2ecf2, 0x4b4232, 0.85));
 const sun = new THREE.DirectionalLight(0xfff0d4, 0.85); sun.position.set(60, 120, 40); scene.add(sun);
 
@@ -256,9 +260,18 @@ for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const k = I(i, j); tPo
 tGeo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
 tGeo.setAttribute('color', new THREE.BufferAttribute(tCol, 3));
 tGeo.setIndex(new THREE.BufferAttribute(tIdx, 1));
+const tNrm = new Float32Array(N * N * 3);
+tGeo.setAttribute('normal', new THREE.BufferAttribute(tNrm, 3));
+function normalAt(i, j) {
+  const k = I(i, j);
+  const nx = (H[I(Math.max(i - 1, 0), j)] - H[I(Math.min(i + 1, N - 1), j)]) / (2 * CELL);
+  const nz = (H[I(i, Math.max(j - 1, 0))] - H[I(i, Math.min(j + 1, N - 1))]) / (2 * CELL);
+  const L = Math.hypot(nx, 1, nz);
+  tNrm[k * 3] = nx / L; tNrm[k * 3 + 1] = 1 / L; tNrm[k * 3 + 2] = nz / L;
+}
 const terrain = new THREE.Mesh(tGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
 scene.add(terrain);
-const skirt = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), new THREE.MeshLambertMaterial({ color: 0x6f6a55 }));
+const skirt = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), new THREE.MeshLambertMaterial({ color: 0x6f6a55 }));
 skirt.rotation.x = -Math.PI / 2; skirt.position.y = -3.4; scene.add(skirt);
 
 function colorVertex(i, j) {
@@ -279,9 +292,8 @@ function colorVertex(i, j) {
   r = lerp(r, 0.27, bed); g = lerp(g, 0.26, bed); b = lerp(b, 0.3, bed);
   tCol[k * 3] = r; tCol[k * 3 + 1] = g; tCol[k * 3 + 2] = b;
 }
-for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) colorVertex(i, j);
-tGeo.computeVertexNormals();
-tGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 140);
+for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { colorVertex(i, j); normalAt(i, j); }
+tGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 260);
 
 let dirty = null;
 function markDirty(i0, j0, i1, j1) {
@@ -291,10 +303,10 @@ function markDirty(i0, j0, i1, j1) {
 function flushTerrain() {
   if (!dirty) return;
   const i0 = Math.max(0, dirty[0] - 1), j0 = Math.max(0, dirty[1] - 1), i1 = Math.min(N - 1, dirty[2] + 1), j1 = Math.min(N - 1, dirty[3] + 1);
-  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { tPos[I(i, j) * 3 + 1] = H[I(i, j)]; colorVertex(i, j); }
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { tPos[I(i, j) * 3 + 1] = H[I(i, j)]; colorVertex(i, j); normalAt(i, j); }
   tGeo.attributes.position.needsUpdate = true;
   tGeo.attributes.color.needsUpdate = true;
-  tGeo.computeVertexNormals();
+  tGeo.attributes.normal.needsUpdate = true;
   dirty = null;
 }
 function forVerts(x, z, r, fn) {
@@ -330,17 +342,17 @@ let curStamp = 0;
 const heapA = new Int32Array(NN * 4), heapF = new Float32Array(NN * 4);
 const DIRS = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2]];
 function cellOf(x, z) { return [clamp(Math.round(gx(x)), 0, N - 1), clamp(Math.round(gx(z)), 0, N - 1)]; }
-function lineWalkable(ax, az, bx, bz) {
+function lineWalkable(ax, az, bx, bz, slope = WORLD.maxSlope) {
   const L = dist(ax, az, bx, bz), steps = Math.max(1, Math.ceil(L / (CELL * 0.5)));
   let ph = hAt(ax, az);
   for (let s = 1; s <= steps; s++) {
     const t = s / steps, x = lerp(ax, bx, t), z = lerp(az, bz, t), h = hAt(x, z);
-    if (Math.abs(h - ph) / (L / steps) > WORLD.maxSlope * 1.08) return false;
+    if (Math.abs(h - ph) / (L / steps) > slope * 1.08) return false;
     ph = h;
   }
   return true;
 }
-function findPath(sx, sz, tx, tz) {
+function findPath(sx, sz, tx, tz, slope = WORLD.maxSlope) {
   curStamp++;
   const [si, sj] = cellOf(sx, sz), [ti, tj] = cellOf(tx, tz);
   const start = I(si, sj), goal = I(ti, tj);
@@ -350,8 +362,8 @@ function findPath(sx, sz, tx, tz) {
   const pop = () => { const top = heapA[0]; hs--; if (hs > 0) { heapA[0] = heapA[hs]; heapF[0] = heapF[hs]; let p = 0; for (;;) { const l = p * 2 + 1, r = l + 1; let m = p; if (l < hs && heapF[l] < heapF[m]) m = l; if (r < hs && heapF[r] < heapF[m]) m = r; if (m === p) break; [heapA[p], heapA[m]] = [heapA[m], heapA[p]]; [heapF[p], heapF[m]] = [heapF[m], heapF[p]]; p = m; } } return top; };
   stamp[start] = curStamp; gScore[start] = 0; came[start] = -1; push(start, hfn(start));
   let best = start, bestH = hfn(start), iter = 0;
-  const maxS = WORLD.maxSlope;
-  while (hs > 0 && iter++ < 40000) {
+  const maxS = slope;
+  while (hs > 0 && iter++ < 160000) {
     const k = pop();
     if (closed[k] === curStamp) continue;
     closed[k] = curStamp;
@@ -378,7 +390,7 @@ function findPath(sx, sz, tx, tz) {
   let cur = [sx, sz], a = 0;
   while (a < raw.length) {
     let b = raw.length - 1;
-    while (b > a && !lineWalkable(cur[0], cur[1], raw[b][0], raw[b][1])) b--;
+    while (b > a && !lineWalkable(cur[0], cur[1], raw[b][0], raw[b][1], slope)) b--;
     out.push(raw[b]); cur = raw[b]; a = b + 1;
   }
   return { pts: out, reached: best === goal };
@@ -386,7 +398,8 @@ function findPath(sx, sz, tx, tz) {
 
 // =============================================================== models
 const M = c => new THREE.MeshLambertMaterial({ color: c });
-const MAT = { skin: M(0xd7a07c), wood: M(0x5a3b22), iron: M(0x2b2c2f), bronze: M(0xb07a30), apron: M(0x5e3f25), gold: M(0xd3aa52), horse: M(0x5a3a26), shell: M(0x1d1d1f), saber: M(0xcfd3d8) };
+const MAT = { skin: M(0xd7a07c), wood: M(0x5a3b22), iron: M(0x2b2c2f), bronze: M(0xb07a30), apron: M(0x5e3f25), gold: M(0xd3aa52), horse: M(0x5a3a26), shell: M(0x1d1d1f), saber: M(0xcfd3d8), hull: M(0x3d434c),
+  glass: new THREE.MeshLambertMaterial({ color: 0xa8dcff, transparent: true, opacity: 0.38, depthWrite: false }), glow: new THREE.MeshBasicMaterial({ color: 0x86eeff }) };
 const TMAT = {};
 for (const t in TEAM) TMAT[t] = { coat: M(TEAM[t].coat), trou: M(TEAM[t].trou), cap: M(TEAM[t].cap), ring: new THREE.MeshBasicMaterial({ color: new THREE.Color(TEAM[t].css), transparent: true, opacity: 0.85, depthWrite: false }) };
 const GEO = {
@@ -397,12 +410,22 @@ const GEO = {
   wheel: new THREE.CylinderGeometry(0.72, 0.72, 0.1, 14), barrel: new THREE.CylinderGeometry(0.15, 0.22, 1.8, 10), trail: new THREE.BoxGeometry(0.26, 0.2, 2.2),
   gat: new THREE.CylinderGeometry(0.15, 0.15, 1.15, 8), drum: new THREE.CylinderGeometry(0.2, 0.2, 0.16, 12), smallWheel: new THREE.CylinderGeometry(0.45, 0.45, 0.08, 12),
   mortar: new THREE.CylinderGeometry(0.24, 0.3, 0.62, 10), mortarBed: new THREE.BoxGeometry(0.8, 0.22, 0.9), shellBall: new THREE.SphereGeometry(0.14, 8, 6),
+  deck: new THREE.BoxGeometry(2.6, 0.28, 5.4), rail: new THREE.BoxGeometry(0.08, 0.4, 5.0), glass: new THREE.BoxGeometry(2.5, 1.25, 0.08),
+  pod: new THREE.CylinderGeometry(0.34, 0.3, 4.6, 10), glowBar: new THREE.BoxGeometry(0.42, 0.04, 3.9), stripe: new THREE.BoxGeometry(2.62, 0.1, 0.5),
 };
 function addMesh(g, geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); g.add(m); return m; }
 function makeSoldier(type, team) {
   const g = new THREE.Group(), tm = TMAT[team];
   let topY = 0;
-  if (type === 'cavalry') {
+  if (type === 'hover') {
+    addMesh(g, GEO.deck, MAT.hull, 0, 0.55, 0);
+    addMesh(g, GEO.stripe, tm.coat, 0, 0.72, -2.2);
+    addMesh(g, GEO.rail, tm.coat, 1.28, 0.9, -0.1);
+    addMesh(g, GEO.rail, tm.coat, -1.28, 0.9, -0.1);
+    addMesh(g, GEO.glass, MAT.glass, 0, 1.25, 2.6, -0.22);
+    for (const x of [-0.85, 0.85]) { addMesh(g, GEO.pod, MAT.iron, x, 0.25, -0.2, Math.PI / 2); addMesh(g, GEO.glowBar, MAT.glow, x, -0.08, -0.2); }
+    topY = 1.9;
+  } else if (type === 'cavalry') {
     addMesh(g, GEO.horse, MAT.horse, 0, 1.25, 0);
     for (const [x, z] of [[-0.2, 0.75], [0.2, 0.75], [-0.2, -0.75], [0.2, -0.75]]) addMesh(g, GEO.hleg, MAT.horse, x, 0.5, z);
     addMesh(g, GEO.hneck, MAT.horse, 0, 1.75, 1.0, 0.6);
@@ -421,7 +444,8 @@ function makeSoldier(type, team) {
     if (type === 'commander') addMesh(g, GEO.sash, MAT.gold, 0, 1.28, 0, 0, 0, 0.5);
     topY = 2.0;
   }
-  const ring = addMesh(g, GEO.ring, tm.ring, 0, 0.06, 0, -Math.PI / 2);
+  const ring = addMesh(g, GEO.ring, tm.ring, 0, type === 'hover' ? -0.6 : 0.06, 0, -Math.PI / 2);
+  if (type === 'hover') ring.scale.setScalar(3.6);
   ring.visible = false;
   g.userData.ring = ring; g.userData.top = topY;
   scene.add(g);
@@ -529,6 +553,7 @@ class Squad {
     this.members = []; this.order = null; this.path = null; this.pathI = 0; this.repathT = 0; this.goalPrev = null;
     this.morale = 100; this.supT = 9; this.pinned = false; this.weapon = null; this.status = ''; this.dead = false;
     this.auraC = false; this.auraK = false; this.moving = false; this.autoTarget = null;
+    this.carrier = null; this.cargo = []; this.digT = 0;
     for (let k = 0; k < this.S.men; k++) this.members.push(new Soldier(this, k, x + rand(-2, 2), z + rand(-2, 2)));
     if (this.S.gun) { const g = new Gun(this.S.gun, team, x, z, heading); g.crew = this; this.weapon = g; }
     const st = stat(team, type); st.squads++; st.men += this.members.length;
@@ -545,7 +570,23 @@ function spawnSquad(type, team, x, z) {
 }
 function spawnAtBase(type, team) {
   const B = BASES[team], dir = Math.sign(BASES[ENEMY[team]].z - B.z);
-  return spawnSquad(type, team, B.x + rand(-14, 14), B.z + dir * rand(6, 14));
+  return spawnSquad(type, team, B.x + rand(-20, 20), B.z + dir * rand(8, 22));
+}
+function seatsFree(v) { return v.S.carry - v.cargo.filter(c => !c.dead).reduce((s, c) => s + c.alive.length, 0); }
+function embark(sq, v) {
+  if (sq.carrier || v.dead || seatsFree(v) < sq.alive.length) return false;
+  sq.carrier = v; v.cargo.push(sq); setOrder(sq, null); sfx('click', v.px, v.pz);
+  return true;
+}
+function disembark(sq, hurt) {
+  const v = sq.carrier;
+  if (!v) return;
+  v.cargo = v.cargo.filter(c => c !== sq);
+  sq.carrier = null;
+  const side = Math.random() < 0.5 ? 1 : -1, rx = Math.cos(v.heading) * side, rz = -Math.sin(v.heading) * side;
+  sq.px = v.px + rx * 4; sq.pz = v.pz + rz * 4; sq.heading = v.heading;
+  for (const m of sq.alive) { m.x = sq.px + rand(-1.5, 1.5); m.z = sq.pz + rand(-1.5, 1.5); m.y = hAt(m.x, m.z); if (hurt) damage(m, 25, null); }
+  setOrder(sq, null);
 }
 function clearUnits() {
   for (const sq of squads) for (const m of sq.members) scene.remove(m.mesh);
@@ -557,8 +598,8 @@ function clearUnits() {
 function scenario() {
   clearUnits();
   const b = (t, x, z) => spawnSquad(t, 'blue', x, z), g = (t, x, z) => spawnSquad(t, 'grey', x, z);
-  b('commander', 0, -52); b('rifle', -12, -44); b('rifle', 12, -44); b('sapper', -26, -50); b('cannon', 4, -56); b('crank', -4, -46);
-  g('rifle', -12, 44); g('rifle', 12, 44); g('mortar', 0, 56); g('cavalry', 26, 48); g('crank', 4, 46); g('sapper', 24, 54);
+  b('commander', 0, -110); b('rifle', -14, -100); b('rifle', 14, -100); b('sapper', -30, -108); b('cannon', 4, -116); b('crank', -4, -102); b('hover', 26, -112);
+  g('rifle', -14, 100); g('rifle', 14, 100); g('mortar', 0, 114); g('cavalry', 30, 104); g('crank', 4, 102); g('sapper', 28, 112); g('hover', -26, 112);
 }
 
 // =============================================================== combat helpers
@@ -581,27 +622,49 @@ function kill(m, src) {
   if (!sq.alive.length) {
     sq.dead = true; selected.delete(sq);
     if (sq.weapon) { sq.weapon.crew = null; sq.weapon.team = null; sq.weapon = null; }
+    if (sq.carrier) sq.carrier.cargo = sq.carrier.cargo.filter(c => c !== sq);
+    if (sq.S.vehicle) {
+      for (const c of sq.cargo.slice()) disembark(c, true);
+      puff(flashTex, m.x, m.y + 1, m.z, 9, 0.35, 0, true);
+      for (let n = 0; n < 8; n++) puff(smokeTex, m.x + rand(-2, 2), m.y + rand(0.5, 3), m.z + rand(-2, 2), rand(4, 7), rand(2, 3.5), rand(0.8, 1.6));
+      sfx('boom', m.x, m.z);
+    }
   }
 }
 function damage(m, dmg, src) { if (!m.alive) return; m.hp -= dmg; if (m.hp <= 0) kill(m, src); }
 function nearestMember(sq, x, z) { let best = null, bd = 1e9; for (const m of sq.members) if (m.alive) { const d = dist(m.x, m.z, x, z); if (d < bd) { bd = d; best = m; } } return [best, bd]; }
 function effRange(S, shooterY, targetY) { return S.range * (1 + clamp(shooterY - targetY, 0, 15) * 0.02); }
 function hitChance(S, sh, tm, d, sq) {
-  let p = S.accuracy * (1 + clamp(sh.y - tm.y, -10, 12) * 0.03) * (1 - 0.45 * clamp(d / S.range, 0, 1));
+  let p = (sq.carrier && sq.carrier.moving ? 0.7 : 1) * S.accuracy * (1 + clamp(sh.y - tm.y, -10, 12) * 0.03) * (1 - 0.45 * clamp(d / S.range, 0, 1));
   if (inCover(tm)) p *= 0.55;
   if (sq.pinned) p *= 0.6;
   if (sq.auraK) p *= 1.1;
   return clamp(p, 0.02, 0.97);
 }
-function fireShot(sq, from, tm, S) {
+function fireShot(sq, from, tm, S, snd) {
   const st = stat(sq.team, sq.type);
   st.shots++;
+  sfx(snd || 'musket', from.x, from.z);
+  const v = tm.sq.carrier;
+  if (v && !v.dead) {
+    const veh = v.alive[0];
+    if (veh) {
+      const ang = Math.atan2(from.x - veh.x, from.z - veh.z);
+      const da = Math.abs(((ang - v.heading) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
+      if (da < 0.9) {
+        const gx2 = veh.x + Math.sin(v.heading) * 2.6, gz2 = veh.z + Math.cos(v.heading) * 2.6;
+        addTracer([from.x, from.y + 1.4, from.z], [gx2 + rand(-1, 1), veh.y + 1.3, gz2], [0.7, 0.9, 1]);
+        suppress(tm.sq, S.suppress * 0.3);
+        return;
+      }
+    }
+  }
   const d = dist(from.x, from.z, tm.x, tm.z);
   const hit = Math.random() < hitChance(S, from, tm, d, sq);
   const tx = tm.x + (hit ? 0 : rand(-1.5, 1.5)), tz = tm.z + (hit ? 0 : rand(-1.5, 1.5));
   const col = sq.team === 'blue' ? [1, 0.95, 0.7] : [1, 0.8, 0.6];
   addTracer([from.x, from.y + 1.4, from.z], [tx, tm.y + (hit ? 1.2 : 0.4), tz], col);
-  if (hit) { st.hits++; damage(tm, S.damage, sq); }
+  if (hit) { st.hits++; damage(tm, S.damage * (tm.sq.S.vehicle ? tm.sq.S.armor : 1), sq); }
   suppress(tm.sq, S.suppress);
 }
 function explode(x, z, S, src, craterR, depthMul) {
@@ -620,6 +683,7 @@ function explode(x, z, S, src, craterR, depthMul) {
   }
   if (anyHit && src) stat(src.team, src.type).hits++;
   crater(x, z, craterR, depthMul);
+  sfx('boom', x, z);
   puff(flashTex, x, y + 1, z, 7, 0.28, 0, true);
   for (let n = 0; n < 6; n++) puff(dustTex, x + rand(-2, 2), y + rand(0.5, 2.5), z + rand(-2, 2), rand(4, 7), rand(1.4, 2.4), rand(0.6, 1.4));
 }
@@ -628,7 +692,8 @@ function lob(gun, tx, tz, S, flat) {
   const d = dist(gun.x, gun.z, tx, tz), T = flat ? 0.15 + d / 110 : 2.6 + d / 60, g = 18;
   const vx = (tx - gun.x) / T, vz = (tz - gun.z) / T, vy = (ty - sy + 0.5 * g * T * T) / T;
   const mesh = new THREE.Mesh(GEO.shellBall, MAT.shell); scene.add(mesh);
-  projectiles.push({ x: gun.x, y: sy, z: gun.z, vx, vy, vz, t: 0, S, src: gun.crew, kind: gun.kind, mesh });
+  projectiles.push({ x: gun.x, y: sy, z: gun.z, vx, vy, vz, t: 0, S, src: gun.crew, kind: gun.kind, mesh, tx, tz, whistled: flat });
+  sfx(flat ? 'cannon' : 'mortar', gun.x, gun.z);
   puff(smokeTex, gun.x + Math.sin(gun.heading) * 1.2, sy + 0.4, gun.z + Math.cos(gun.heading) * 1.2, flat ? 4 : 3, 1.8, 0.7);
 }
 function losClear(ax, az, ay, bx, bz, by) {
@@ -641,6 +706,7 @@ function losClear(ax, az, ay, bx, bz, by) {
 function enemiesOf(sq) { return squads.filter(o => !o.dead && o.team !== sq.team); }
 function autoTarget(sq) {
   const WS = sq.WS, py = hAt(sq.px, sq.pz);
+  if (WS.range <= 0) return null;
   let best = null, bd = 1e9;
   for (const o of enemiesOf(sq)) {
     const [m, d] = nearestMember(o, sq.px, sq.pz);
@@ -705,6 +771,8 @@ function updateSquad(sq, dt) {
   if (sq.pinned && sq.morale > 45) sq.pinned = false;
   if (!sq.pinned && sq.morale < 30) sq.pinned = true;
 
+  if (sq.carrier) { if (sq.carrier.dead) disembark(sq, true); else { sq.px = sq.carrier.px; sq.pz = sq.carrier.pz; } }
+
   // decide goal
   const o = sq.order;
   let goal = null, hold = false, fireAt = null, working = false;
@@ -723,6 +791,10 @@ function updateSquad(sq, dt) {
   } else if (o && o.k === 'fire') {
     const d = dist(sq.px, sq.pz, o.x, o.z);
     if (d > WS.range) goal = [o.x, o.z]; else fireAt = [o.x, o.z];
+  } else if (o && o.k === 'board') {
+    if (o.t.dead) setOrder(sq, null);
+    else if (dist(sq.px, sq.pz, o.t.px, o.t.pz) > 5) goal = [o.t.px, o.t.pz];
+    else if (!embark(sq, o.t)) { setOrder(sq, null); sq.status = 'Not enough seats on that skiff.'; }
   } else if (o && o.k === 'repair') {
     if (dist(sq.px, sq.pz, o.x, o.z) > 3.5) goal = [o.x, o.z]; else working = true;
   } else if (o && o.k === 'ramp') {
@@ -735,10 +807,10 @@ function updateSquad(sq, dt) {
   // move the squad anchor along its path
   sq.moving = false;
   const lagging = al.reduce((s, m) => { const sl = slotOf(sq, al.indexOf(m), al.length); return s + dist(m.x, m.z, sl[0], sl[1]); }, 0) / al.length > 5;
-  if (goal) {
+  if (goal && !sq.carrier) {
     sq.repathT -= dt;
     if (!sq.path || sq.repathT <= 0 || !sq.goalPrev || dist(goal[0], goal[1], sq.goalPrev[0], sq.goalPrev[1]) > 3) {
-      const p = findPath(sq.px, sq.pz, goal[0], goal[1]);
+      const p = findPath(sq.px, sq.pz, goal[0], goal[1], S.vehicle ? Math.max(1.6, WORLD.maxSlope) : WORLD.maxSlope);
       sq.path = p.pts; sq.pathI = 0; sq.reach = p.reached; sq.repathT = 2.5; sq.goalPrev = goal.slice();
     }
     const tp = sq.path[sq.pathI];
@@ -748,7 +820,7 @@ function updateSquad(sq, dt) {
       if (dd > 0.01) {
         const nx = sq.px + dx / dd * Math.min(dd, speed * dt), nz = sq.pz + dz / dd * Math.min(dd, speed * dt);
         const grade = (hAt(nx, nz) - hAt(sq.px, sq.pz)) / Math.max(0.001, speed * dt);
-        speed *= clamp(1 - 0.45 * grade, 0.45, 1.2);
+        speed *= S.vehicle ? clamp(1 - 0.2 * grade, 0.6, 1.1) : clamp(1 - 0.45 * grade, 0.45, 1.2);
         const step = Math.min(dd, speed * dt);
         sq.px += dx / dd * step; sq.pz += dz / dd * step; sq.heading = Math.atan2(dx, dz); sq.moving = true;
       }
@@ -779,8 +851,24 @@ function updateSquad(sq, dt) {
   const n = al.length, cav = sq.type === 'cavalry';
   let workCenter = null;
   if (working && o.k === 'repair') workCenter = [o.x, o.z];
+  let seat0 = 0;
+  if (sq.carrier) for (const c of sq.carrier.cargo) { if (c === sq) break; if (!c.dead) seat0 += c.alive.length; }
   for (let idx = 0; idx < n; idx++) {
     const m = al[idx];
+    if (sq.carrier) {
+      const v = sq.carrier, veh = v.alive[0], seat = seat0 + idx, lat = seat % 2 ? 0.62 : -0.62, back = 1.6 - Math.floor(seat / 2) * 0.82;
+      const a = v.heading, fx = Math.sin(a), fz = Math.cos(a), rx = Math.cos(a), rz = -Math.sin(a);
+      m.x = v.px + rx * lat + fx * back; m.z = v.pz + rz * lat + fz * back; m.y = (veh ? veh.y : hAt(m.x, m.z)) + 0.7; m.moving = false;
+      m.heading = aim ? Math.atan2(aim[0] - m.x, aim[1] - m.z) : a + (lat > 0 ? -Math.PI / 2 : Math.PI / 2);
+      if (!gun && tgt) {
+        m.reload -= dt * (sq.auraK ? 1 / 0.85 : 1) * (sq.pinned ? 0.65 : 1);
+        if (m.reload <= 0) {
+          const [tm, d] = nearestMember(tgt, m.x, m.z);
+          if (tm && d <= effRange(S, m.y, tm.y)) { fireShot(sq, m, tm, S); puff(smokeTex, m.x, m.y + 1.4, m.z, 1.6, 1.6, 0.35); m.reload = S.reload * rand(0.85, 1.15); } else m.reload = 0.25;
+        }
+      }
+      continue;
+    }
     let [sx, sz] = slotOf(sq, idx, n);
     if (working && o.k === 'repair') { const a = idx / n * Math.PI * 2 + simTime * 0.05; sx = o.x + Math.cos(a) * (o.r * 0.7); sz = o.z + Math.sin(a) * (o.r * 0.7); }
     if (working && o.k === 'ramp') { const t = (idx + 0.5) / n; sx = lerp(o.ax, o.bx, t * 0.85) + (idx % 2 ? 1 : -1) * 3.2 * Math.cos(Math.atan2(o.bx - o.ax, o.bz - o.az)); sz = lerp(o.az, o.bz, t * 0.85) - (idx % 2 ? 1 : -1) * 3.2 * Math.sin(Math.atan2(o.bx - o.ax, o.bz - o.az)); }
@@ -791,13 +879,17 @@ function updateSquad(sq, dt) {
     const mspd = Math.min(S.speed, WS.speed) * (cav && enemyM ? 1.25 : 1.35) * (sq.pinned ? 0.5 : 1);
     m.moving = dd > 0.35;
     if (m.moving) { const st = Math.min(dd, mspd * dt); m.x += dx / dd * st; m.z += dz / dd * st; m.heading = Math.atan2(dx, dz); }
-    m.y = hAt(m.x, m.z);
+    if (S.vehicle) {
+      const a = sq.heading, fx = Math.sin(a) * 2.2, fz = Math.cos(a) * 2.2;
+      const ty = Math.max(hAt(m.x, m.z), hAt(m.x + fx, m.z + fz), hAt(m.x - fx, m.z - fz)) + 0.75;
+      m.y = lerp(m.y, ty, clamp(dt * 6, 0, 1)); m.heading = sq.heading;
+    } else m.y = hAt(m.x, m.z);
     if (enemyM) m.charge = Math.min(1, m.charge + dt * 0.6); else m.charge = Math.max(0, m.charge - dt);
     const wantFace = enemyM ? [enemyM.x, enemyM.z] : (workCenter || (aim && !m.moving ? aim : null));
     if (wantFace) m.heading = Math.atan2(wantFace[0] - m.x, wantFace[1] - m.z);
 
     // small-arms fire and sabers
-    if (!gun) {
+    if (!gun && S.range > 0) {
       const relMul = (sq.auraK ? 1 / 0.85 : 1) * (sq.pinned ? 0.65 : 1);
       m.reload -= dt * relMul;
       if (m.reload <= 0) {
@@ -805,7 +897,8 @@ function updateSquad(sq, dt) {
           const d = dist(m.x, m.z, enemyM.x, enemyM.z);
           if (d <= S.range + 0.6) {
             const st = stat(sq.team, sq.type); st.shots++;
-            if (Math.random() < S.accuracy) { st.hits++; damage(enemyM, S.damage * (1 + m.charge), sq); }
+            sfx('saber', m.x, m.z);
+            if (Math.random() < S.accuracy) { st.hits++; damage(enemyM, S.damage * (1 + m.charge) * (enemyM.sq.S.vehicle ? enemyM.sq.S.armor : 1), sq); }
             suppress(enemyM.sq, S.suppress * (1 + m.charge * 2)); m.charge = 0;
             m.reload = S.reload * rand(0.85, 1.15);
           } else m.reload = 0.1;
@@ -831,7 +924,7 @@ function updateSquad(sq, dt) {
       if (gun.kind === 'crank' && tgt) {
         const [tm, d] = nearestMember(tgt, gun.x, gun.z);
         if (tm && d <= effRange(WS, hAt(gun.x, gun.z), tm.y)) {
-          fireShot(sq, { x: gun.x + Math.sin(gun.heading) * 0.9, z: gun.z + Math.cos(gun.heading) * 0.9, y: hAt(gun.x, gun.z) - 0.4 }, tm, WS);
+          fireShot(sq, { x: gun.x + Math.sin(gun.heading) * 0.9, z: gun.z + Math.cos(gun.heading) * 0.9, y: hAt(gun.x, gun.z) - 0.4 }, tm, WS, 'crank');
           gun.shots++; gun.reload = WS.reload + (gun.shots % 25 === 0 ? 2.5 : 0);
           if (gun.shots % 3 === 0) puff(smokeTex, gun.x + Math.sin(gun.heading) * 1.4, hAt(gun.x, gun.z) + 1, gun.z + Math.cos(gun.heading) * 1.4, 1.4, 0.9, 0.5);
         }
@@ -855,6 +948,8 @@ function updateSquad(sq, dt) {
 
   // engineering work
   if (working) {
+    sq.digT -= dt;
+    if (sq.digT <= 0) { sq.digT = rand(0.35, 0.7); const w = al[(Math.random() * n) | 0]; sfx('dig', w.x, w.z); }
     if (o.k === 'repair') workRepair(sq, dt, n);
     else workRamp(sq, dt, n);
   }
@@ -876,7 +971,7 @@ function updateCaptures() {
   for (const g of guns) {
     if (g.crew) continue;
     for (const sq of squads) {
-      if (sq.dead || sq.weapon || sq.type === 'cavalry' || sq.type === 'commander') continue;
+      if (sq.dead || sq.weapon || sq.carrier || sq.S.vehicle || sq.type === 'cavalry' || sq.type === 'commander') continue;
       if (sq.order && sq.order.k === 'attack') continue;
       if (dist(sq.px, sq.pz, g.x, g.z) < 3.8) {
         g.crew = sq; g.team = sq.team; sq.weapon = g; setOrder(sq, null);
@@ -892,6 +987,7 @@ function updateProjectiles(dt) {
     p.t += dt; p.vy -= 18 * dt;
     p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
     p.mesh.position.set(p.x, p.y, p.z);
+    if (!p.whistled && p.vy < 0 && p.y - hAt(p.x, p.z) < 26) { p.whistled = true; sfx('whistle', p.tx, p.tz); }
     if ((p.t > 0.05 && p.y <= hAt(p.x, p.z)) || Math.abs(p.x) > HALF || Math.abs(p.z) > HALF) {
       if (Math.abs(p.x) <= HALF && Math.abs(p.z) <= HALF) explode(p.x, p.z, p.S, p.src && !p.src.dead ? p.src : null, p.kind === 'mortar' ? 3 : 2.6, p.kind === 'mortar' ? 1 : 1.1);
       scene.remove(p.mesh); projectiles.splice(n, 1);
@@ -915,7 +1011,7 @@ function findCrater(x, z, r) {
 function runAI() {
   for (const team of aiTeams()) {
     for (const sq of squads) {
-      if (sq.dead || sq.team !== team || selected.has(sq)) continue;
+      if (sq.dead || sq.team !== team || selected.has(sq) || sq.S.vehicle || sq.carrier) continue;
       if (sq.order && sq.order.k !== 'move') continue;
       if (sq.order && sq.order.k === 'move' && !sq.order.ai) continue;
       const foes = enemiesOf(sq);
@@ -946,9 +1042,9 @@ function runAI() {
 }
 
 // =============================================================== camera + input
-const cam = { x: 0, z: -34, yaw: Math.PI, dist: 78, pitch: 0.92 };
+const cam = { x: 0, z: -90, yaw: Math.PI, dist: window.innerWidth < 640 ? 120 : 95, pitch: 0.92 };
 function placeCamera() {
-  cam.x = clamp(cam.x, -HALF, HALF); cam.z = clamp(cam.z, -HALF, HALF); cam.dist = clamp(cam.dist, 18, 190);
+  cam.x = clamp(cam.x, -HALF, HALF); cam.z = clamp(cam.z, -HALF, HALF); cam.dist = clamp(cam.dist, 18, 340);
   const ty = hAt(cam.x, cam.z);
   camera.position.set(cam.x + Math.sin(cam.yaw) * Math.cos(cam.pitch) * cam.dist, ty + Math.sin(cam.pitch) * cam.dist, cam.z + Math.cos(cam.yaw) * Math.cos(cam.pitch) * cam.dist);
   camera.lookAt(cam.x, ty, cam.z);
@@ -999,11 +1095,19 @@ function commandAt(cx, cy, attackMove) {
   const team = selTeam();
   if (!team) return false;
   const hitSq = pickSquad(cx, cy, 30);
-  if (hitSq && hitSq.team !== team) { orderSelected(sq => setOrder(sq, { k: 'attack', t: hitSq })); markAt(hitSq.px, hitSq.pz, '#d4574a'); return true; }
+  const list0 = [...selected].filter(s => !s.dead);
+  const riders = list0.filter(s => !s.S.vehicle && !s.weapon && s.type !== 'cavalry' && !s.carrier);
+  if (hitSq && hitSq.team === team && hitSq.S.vehicle && riders.length) {
+    for (const s of riders) setOrder(s, { k: 'board', t: hitSq });
+    markAt(hitSq.px, hitSq.pz, '#86eeff'); refreshCmd(); return true;
+  }
+  const leaveIfRiding = sq => { if (sq.carrier && !selected.has(sq.carrier)) disembark(sq, false); };
+  if (hitSq && hitSq.team !== team) { orderSelected(sq => { if (sq.carrier && selected.has(sq.carrier)) return; leaveIfRiding(sq); setOrder(sq, { k: 'attack', t: hitSq }); }); markAt(hitSq.px, hitSq.pz, '#d4574a'); return true; }
   const g = groundAt(cx, cy);
   if (!g) return false;
-  const list = [...selected].filter(s => !s.dead), n = list.length;
+  const list = [...selected].filter(s => !s.dead && !(s.carrier && selected.has(s.carrier))), n = list.length;
   list.forEach((sq, i) => {
+    leaveIfRiding(sq);
     const off = (i - (n - 1) / 2) * 7, a = Math.atan2(g[0] - sq.px, g[1] - sq.pz);
     setOrder(sq, { k: 'move', x: g[0] + Math.cos(a) * off, z: g[1] - Math.sin(a) * off, atk: !!attackMove });
   });
@@ -1012,7 +1116,7 @@ function commandAt(cx, cy, attackMove) {
   return true;
 }
 const marks = [];
-function markAt(x, z, color) { marks.push({ x, z, color, t: 0 }); }
+function markAt(x, z, color) { marks.push({ x, z, color, t: 0 }); sfx('click', x, z); }
 
 function onTap(cx, cy, button, shift, isTouch) {
   if (toolMode) { useTool(cx, cy); return; }
@@ -1020,6 +1124,7 @@ function onTap(cx, cy, button, shift, isTouch) {
   const sq = pickSquad(cx, cy, isTouch ? 34 : 24);
   if (sq) {
     if (selected.size && selTeam() !== sq.team) commandAt(cx, cy, false);
+    else if (sq.S.vehicle && selected.size && !selected.has(sq) && [...selected].some(s => !s.S.vehicle && !s.carrier)) commandAt(cx, cy, false);
     else select(sq, shift);
     return;
   }
@@ -1182,20 +1287,20 @@ function drawHUD() {
     c.fillStyle = '#ece4d2'; c.textAlign = 'center'; c.fillText(txt, s[0], s[1] + 1);
   }
   for (const sq of squads) {
-    if (sq.dead) continue;
-    const [x, z] = sq.centroid(), s = toScreen(x, hAt(x, z) + (sq.type === 'cavalry' ? 4 : 3.1), z);
+    if (sq.dead || sq.carrier) continue;
+    const [x, z] = sq.centroid(), s = toScreen(x, hAt(x, z) + (sq.type === 'cavalry' ? 4 : sq.S.vehicle ? 4.2 : 3.1), z);
     if (!s) continue;
-    const al = sq.alive.length, sel = selected.has(sq);
+    const al = sq.alive.length, sel = selected.has(sq) || sq.cargo.some(c => selected.has(c));
     const tag = sq.weapon ? TYPES[sq.weapon.kind].tag : sq.S.tag;
-    const label = `${tag} ${al}`;
-    const bw = 46, bh = 17, bx = s[0] - bw / 2, by = s[1] - bh;
+    const label = sq.S.vehicle ? `${tag} ${sq.S.carry - seatsFree(sq)}/${sq.S.carry}` : `${tag} ${al}`;
+    const bw = sq.S.vehicle ? 58 : 46, bh = 17, bx = s[0] - bw / 2, by = s[1] - bh;
     c.fillStyle = sel ? 'rgba(40,33,18,0.95)' : 'rgba(17,20,26,0.78)';
     c.fillRect(bx, by, bw, bh);
     c.fillStyle = TEAM[sq.team].css; c.fillRect(bx, by, 4, bh);
     c.strokeStyle = sel ? '#d3aa52' : 'rgba(255,255,255,0.12)'; c.lineWidth = sel ? 1.5 : 1; c.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
     c.fillStyle = '#ece4d2'; c.textAlign = 'left'; c.fillText(label, bx + 8, by + bh / 2 + 1);
     if (sq.auraC || sq.auraK) { c.fillStyle = '#d3aa52'; c.fillText('★', bx + bw - 11, by + bh / 2 + 1); }
-    const mor = sq.morale / 100;
+    const mor = sq.S.vehicle ? clamp(sq.alive[0].hp / sq.S.hp, 0, 1) : sq.morale / 100;
     c.fillStyle = 'rgba(0,0,0,0.6)'; c.fillRect(bx, by + bh, bw, 4);
     c.fillStyle = sq.pinned ? '#d4574a' : mor < 0.55 ? '#e0a040' : '#7fb069'; c.fillRect(bx, by + bh, bw * mor, 4);
     if (sq.pinned) { c.fillStyle = '#d4574a'; c.textAlign = 'center'; c.fillText('PINNED', s[0], by - 7); }
@@ -1235,7 +1340,8 @@ function refreshCmd() {
     const sq = list[0], al = sq.alive.length;
     const name = sq.weapon && sq.weapon.kind !== sq.S.gun ? `${sq.S.name} manning a captured ${TYPES[sq.weapon.kind].name.toLowerCase()}` : sq.S.name;
     const o = sq.order;
-    let st = sq.status || (o ? ({ move: o.atk ? 'Attack-moving' : 'Moving', attack: 'Attacking', fire: 'Bombarding', repair: 'Filling crater', ramp: 'Building ramp' })[o.k] : (sq.autoTarget ? 'Firing' : 'Holding'));
+    let st = sq.status || (o ? ({ move: o.atk ? 'Attack-moving' : 'Moving', attack: 'Attacking', fire: 'Bombarding', repair: 'Filling crater', ramp: 'Building ramp', board: 'Heading to the skiff' })[o.k] : (sq.carrier ? 'Riding the skiff' + (sq.autoTarget ? ', firing' : '') : sq.S.vehicle ? 'Idling' : (sq.autoTarget ? 'Firing' : 'Holding')));
+    if (sq.S.vehicle) st += ` · ${sq.S.carry - seatsFree(sq)}/${sq.S.carry} seats taken · hull ${Math.max(0, Math.round(sq.alive[0].hp))}/${sq.S.hp}`;
     if (o && (o.k === 'repair' || o.k === 'ramp') && o.left != null) st += ` · ${o.left.toFixed(1)} m³ of earth left`;
     const auras = [sq.auraC ? 'courage aura' : '', sq.auraK ? 'command aura' : ''].filter(Boolean).join(', ');
     info.innerHTML = `<b>${TEAM[sq.team].name} ${name}</b> · ${al}/${sq.members.length} men · morale ${Math.round(sq.morale)}${sq.pinned ? ' (pinned)' : ''}<br><span class="st">${st}${auras ? ' · ' + auras : ''}</span>`;
@@ -1245,6 +1351,14 @@ function refreshCmd() {
   cmds.append(btn('Attack-move', () => setTool('atkmove')), btn('Stop', () => orderSelected(s => setOrder(s, null))));
   if (list.some(s => s.type === 'sapper' && !s.weapon)) cmds.append(btn('Fill crater', () => setTool('repair')), btn('Build ramp', () => setTool('rampA')));
   if (list.some(s => s.weapon && s.weapon.kind !== 'crank')) cmds.append(btn('Bombard ground', () => setTool('fire')));
+  if (list.some(s => s.S.vehicle && s.cargo.length)) cmds.append(btn('Unload all', () => orderSelected(v => { for (const c of v.cargo.slice()) disembark(c, false); })));
+  if (list.some(s => s.carrier)) cmds.append(btn('Hop off', () => orderSelected(s => disembark(s, false))));
+  if (list.some(s => !s.S.vehicle && !s.carrier && !s.weapon && s.type !== 'cavalry') && squads.some(v => !v.dead && v.S.vehicle && v.team === list[0].team)) cmds.append(btn('Board nearest skiff', () => orderSelected(s => {
+    if (s.S.vehicle || s.carrier || s.weapon || s.type === 'cavalry') return;
+    let best = null, bd = 1e9;
+    for (const v of squads) if (!v.dead && v.S.vehicle && v.team === s.team && seatsFree(v) >= s.alive.length) { const d = dist(v.px, v.pz, s.px, s.pz); if (d < bd) { bd = d; best = v; } }
+    if (best) setOrder(s, { k: 'board', t: best }); else s.status = 'No skiff with enough free seats.';
+  })));
   if (list.some(s => s.weapon)) cmds.append(btn('Abandon gun', () => orderSelected(s => { if (s.weapon) { s.weapon.crew = null; s.weapon.team = null; s.weapon = null; setOrder(s, { k: 'move', x: s.px - Math.sin(s.heading) * 6, z: s.pz - Math.cos(s.heading) * 6 }); } })));
   cmds.append(btn('Deselect', () => select(null, false)));
 }
@@ -1302,9 +1416,11 @@ function renderDrawer() {
       const fields = UNIT_FIELDS.slice();
       if (T.splash != null) fields.push(EXTRA_FIELDS.splash);
       if (T.aura != null) fields.push(EXTRA_FIELDS.aura);
+      if (T.carry != null) fields.push(EXTRA_FIELDS.carry, EXTRA_FIELDS.armor);
       for (const f of fields) body.append(sliderRow(T, f));
       if (T.gun) body.append(p('Gun teams: reload is per shot. The gun slows down as its crew dies, down to a third of normal speed.'));
       if (tuneType === 'cavalry') body.append(p('Cavalry fight with sabers. The first strike of a charge does up to double damage. Friendly squads inside the aura lose 40% less morale and recover faster.'));
+      if (tuneType === 'hover') body.append(p('The skiff has no guns. Passengers fire out of its open sides at 70% accuracy while it moves. The armored glass front stops bullets coming from ahead.'));
       if (tuneType === 'commander') body.append(p('Friendly squads inside the aura reload 15% faster, aim 10% better and recover morale faster.'));
     }
     const r = document.createElement('div'); r.className = 'row';
@@ -1323,7 +1439,7 @@ function renderDrawer() {
     $('#drawerTitle').textContent = 'Controls';
     const dl = document.createElement('dl'); dl.className = 'keys';
     const rows = [
-      ['Tap soldier', 'Select their squad'], ['Tap ground', 'Move selected squads'], ['Tap enemy', 'Attack that squad'],
+      ['Tap soldier', 'Select their squad'], ['Tap ground', 'Move selected squads'], ['Tap enemy', 'Attack that squad'], ['Tap your skiff', 'Selected infantry climb aboard'],
       ['Drag', 'Pan the camera'], ['Pinch', 'Zoom and rotate'],
       ['Left drag', 'Box select (mouse)'], ['Right click', 'Move or attack (mouse)'], ['Right drag', 'Pan (mouse)'], ['Middle drag', 'Rotate and tilt'],
       ['WASD / arrows', 'Pan'], ['Q / E', 'Rotate'], ['Wheel', 'Zoom'], ['A', 'Attack-move'], ['C', 'Drop a shell at the cursor'], ['Space', 'Pause'], ['Esc', 'Cancel or deselect'],
@@ -1332,7 +1448,9 @@ function renderDrawer() {
     body.append(dl, h3('How the battlefield works'),
       p('Shells dig craters down to a bedrock floor 3 m below the plains. Near each base, shown by the dashed ring, terrain takes less damage.'),
       p('Soldiers cannot climb slopes steeper than the walkable limit. The west plateau has a ramp. The east plateau is all cliffs: select Sappers, tap Build ramp, then tap the bottom and the top.'),
-      p('High ground adds range and accuracy. Craters give cover. Kill a gun crew and the gun is left behind for anyone to capture.'));
+      p('High ground adds range and accuracy. Craters give cover. Kill a gun crew and the gun is left behind for anyone to capture.'),
+      p('The Hover Skiff carries up to 10 men, glides over craters and climbs steeper slopes than soldiers can, but not cliffs.'),
+      p('Sound is generated live. On iPhone, turn the ringer switch on or the game stays silent.'));
   }
 }
 function renderReport() {
@@ -1348,6 +1466,116 @@ function renderReport() {
   tbl.innerHTML = html + '</tbody>';
 }
 
+// =============================================================== sound (synthesized live with Web Audio)
+const SFX = { ctx: null, on: true, master: null, wet: null, noise: null, voices: 0, voiceT: 0, hum: null };
+function audioInit() {
+  if (!SFX.on) return;
+  if (SFX.ctx) { if (SFX.ctx.state === 'suspended') SFX.ctx.resume(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  try {
+    const ctx = new AC(); SFX.ctx = ctx;
+    SFX.master = ctx.createGain(); SFX.master.gain.value = 0.7;
+    const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 6;
+    SFX.master.connect(comp); comp.connect(ctx.destination);
+    const nb = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), nd = nb.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+    SFX.noise = nb;
+    const ir = ctx.createBuffer(2, Math.floor(ctx.sampleRate * 2.4), ctx.sampleRate);
+    for (let c = 0; c < 2; c++) { const ch = ir.getChannelData(c); for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / ch.length, 3); }
+    const conv = ctx.createConvolver(); conv.buffer = ir;
+    SFX.wet = ctx.createGain(); SFX.wet.gain.value = 0.28; SFX.wet.connect(conv); conv.connect(SFX.master);
+    const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), lp = ctx.createBiquadFilter(), hg = ctx.createGain();
+    o1.type = 'sawtooth'; o1.frequency.value = 62; o2.type = 'sawtooth'; o2.frequency.value = 93.5;
+    lp.type = 'lowpass'; lp.frequency.value = 360; hg.gain.value = 0;
+    o1.connect(lp); o2.connect(lp); lp.connect(hg); hg.connect(SFX.master); o1.start(); o2.start();
+    SFX.hum = { g: hg, o1, o2 };
+    if (ctx.state === 'suspended') ctx.resume();
+  } catch (e) { SFX.ctx = null; }
+}
+document.addEventListener('pointerdown', audioInit);
+document.addEventListener('keydown', audioInit);
+// Volume falls off with distance from the camera's focus point, pans with screen position,
+// and arrives late by the speed of sound (343 m/s), so a far cannon booms after its flash.
+function sndOut(x, z, reach) {
+  const ctx = SFX.ctx;
+  const d = dist(x, z, cam.x, cam.z);
+  const vol = Math.pow(clamp(1 - d / reach, 0, 1), 1.6) * clamp(95 / cam.dist, 0.35, 1.2);
+  if (vol < 0.02) return null;
+  const g = ctx.createGain(); g.gain.value = vol;
+  let node = g;
+  if (ctx.createStereoPanner) {
+    const pn = ctx.createStereoPanner(), s = toScreen(x, hAt(x, z), z);
+    pn.pan.value = s ? clamp((s[0] / (glCanvas.clientWidth || 1)) * 2 - 1, -1, 1) * 0.75 : 0;
+    g.connect(pn); node = pn;
+  }
+  node.connect(SFX.master); node.connect(SFX.wet);
+  return { g, delay: Math.min(1.2, Math.hypot(d, cam.dist * 0.7) / 343) };
+}
+function noiseBurst(out, t0, dur, ftype, f0, f1, q, peak, decay) {
+  const ctx = SFX.ctx, src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+  src.buffer = SFX.noise;
+  f.type = ftype; f.frequency.setValueAtTime(f0, t0); if (f1) f.frequency.exponentialRampToValueAtTime(f1, t0 + dur); f.Q.value = q;
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(peak, t0 + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t0 + decay);
+  src.connect(f); f.connect(g); g.connect(out);
+  src.start(t0, Math.random() * 1.5); src.stop(t0 + dur + 0.05);
+}
+function tone(out, t0, type, f0, f1, dur, peak) {
+  const ctx = SFX.ctx, o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(peak, t0 + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(out); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+const REACH = { musket: 260, crank: 260, saber: 120, dig: 90, cannon: 650, mortar: 450, boom: 650, whistle: 300 };
+function sfx(kind, x, z) {
+  if (!SFX.ctx || !SFX.on || timeScale === 0 || SFX.ctx.state !== 'running') return;
+  const now = SFX.ctx.currentTime;
+  if (kind === 'musket' || kind === 'crank' || kind === 'saber' || kind === 'dig') {
+    if (now - SFX.voiceT > 0.1) { SFX.voiceT = now; SFX.voices = 0; }
+    if (++SFX.voices > 10) return;
+  }
+  let out, delay = 0;
+  if (kind === 'click') { out = SFX.ctx.createGain(); out.gain.value = 0.2; out.connect(SFX.master); }
+  else { const o = sndOut(x, z, REACH[kind] || 300); if (!o) return; out = o.g; delay = o.delay; }
+  const t = now + delay + 0.005;
+  switch (kind) {
+    case 'musket': noiseBurst(out, t, 0.5, 'bandpass', 1800, 600, 0.6, 0.9, 0.32); tone(out, t, 'sine', 110, 38, 0.18, 0.7); break;
+    case 'crank': noiseBurst(out, t, 0.12, 'highpass', 2200, 0, 0.7, 0.6, 0.07); tone(out, t, 'square', 180, 90, 0.04, 0.22); break;
+    case 'saber': tone(out, t, 'triangle', 2700, 2500, 0.35, 0.3); tone(out, t, 'sine', 4150, 3900, 0.25, 0.18); noiseBurst(out, t, 0.05, 'highpass', 4000, 0, 0.5, 0.5, 0.04); break;
+    case 'dig': noiseBurst(out, t, 0.25, 'bandpass', 650, 350, 1.8, 0.5, 0.2); break;
+    case 'cannon': noiseBurst(out, t, 2.0, 'lowpass', 1400, 180, 0.5, 1.0, 1.6); tone(out, t, 'sine', 70, 28, 0.7, 1.0); break;
+    case 'mortar': noiseBurst(out, t, 0.6, 'lowpass', 600, 150, 0.6, 0.8, 0.45); tone(out, t, 'sine', 95, 40, 0.3, 0.8); break;
+    case 'whistle': {
+      const o = SFX.ctx.createOscillator(), g = SFX.ctx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(1500, t); o.frequency.exponentialRampToValueAtTime(420, t + 1.3);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.16, t + 0.3); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.35);
+      o.connect(g); g.connect(out); o.start(t); o.stop(t + 1.4); break;
+    }
+    case 'boom': noiseBurst(out, t, 2.6, 'lowpass', 1200, 120, 0.4, 1.0, 2.2); tone(out, t, 'sine', 60, 24, 0.9, 1.0); noiseBurst(out, t + 0.08, 0.5, 'highpass', 2500, 0, 0.5, 0.25, 0.4); break;
+    case 'click': tone(out, t, 'sine', 880, 660, 0.06, 0.5); break;
+  }
+}
+function updateHum() {
+  if (!SFX.hum || !SFX.ctx) return;
+  let best = 0, moving = false;
+  for (const sq of squads) {
+    if (sq.dead || !sq.S.vehicle) continue;
+    const v = Math.pow(clamp(1 - dist(sq.px, sq.pz, cam.x, cam.z) / 180, 0, 1), 1.5) * clamp(95 / cam.dist, 0.35, 1.2);
+    if (v > best) { best = v; moving = sq.moving; }
+  }
+  const on = SFX.on && timeScale > 0 ? best * (moving ? 0.16 : 0.07) : 0;
+  const t = SFX.ctx.currentTime;
+  SFX.hum.g.gain.setTargetAtTime(on, t, 0.15);
+  SFX.hum.o1.frequency.setTargetAtTime(moving ? 74 : 60, t, 0.3);
+  SFX.hum.o2.frequency.setTargetAtTime(moving ? 111 : 90, t, 0.3);
+}
+$('#sndBtn').addEventListener('click', () => {
+  SFX.on = !SFX.on;
+  $('#sndBtn').textContent = SFX.on ? 'Sound on' : 'Sound off';
+  $('#sndBtn').setAttribute('aria-pressed', String(SFX.on));
+  if (SFX.on) audioInit();
+});
+
 // =============================================================== loop
 function syncMeshes(dt) {
   for (const sq of squads) {
@@ -1361,7 +1589,8 @@ function syncMeshes(dt) {
         g.userData.ring.visible = sel;
       } else {
         m.deadT += dt;
-        g.rotation.x = -Math.min(1, m.deadT * 3) * Math.PI / 2;
+        if (sq.S.vehicle) g.rotation.set(0, m.heading, Math.min(1, m.deadT * 2) * 0.35);
+        else g.rotation.x = -Math.min(1, m.deadT * 3) * Math.PI / 2;
         g.position.y = m.y - Math.max(0, m.deadT - 10) * 0.2;
         if (m.deadT > 16 && g.parent) scene.remove(g);
       }
@@ -1379,17 +1608,27 @@ function step(dt) {
   if (aiT <= 0) { aiT = 1.2; runAI(); }
 }
 let last = performance.now(), uiT = 0;
+const perf = { frames: 0, t: 0, sim: 0, draw: 0 };
 function frame(now) {
   const real = Math.min(0.1, (now - last) / 1000); last = now;
+  const t0 = performance.now();
   keyPan(real);
   let acc = real * timeScale;
   while (acc > 0) { const d = Math.min(acc, 0.05); step(d); acc -= d; }
   syncMeshes(real * timeScale);
   updateEffects(real * Math.max(timeScale, 0.0001) || 0);
   flushTerrain();
+  const t1 = performance.now();
   placeCamera();
   renderer.render(scene, camera);
   drawHUD();
+  updateHum();
+  const t2 = performance.now();
+  perf.sim += t1 - t0; perf.draw += t2 - t1; perf.frames++; perf.t += real;
+  if (perf.t >= 0.5) {
+    $('#perf').textContent = `${Math.round(perf.frames / perf.t)} fps · logic ${(perf.sim / perf.frames).toFixed(1)} ms · draw ${(perf.draw / perf.frames).toFixed(1)} ms`;
+    perf.frames = 0; perf.t = 0; perf.sim = 0; perf.draw = 0;
+  }
   uiT -= real;
   if (uiT <= 0) { uiT = 0.4; if (selected.size) refreshCmd(); if (drawer === 'report') renderReport(); }
   requestAnimationFrame(frame);
@@ -1402,9 +1641,10 @@ function resize() {
 window.addEventListener('resize', resize);
 
 scenario();
+window.__plateau = { squads, embark, disembark, setOrder, explode };
 resize();
 refreshCmd();
-toast('Grey Coats are marching on you. Tap a soldier to take command.', 4000);
+toast('Grey Coats are marching on you. Tap a soldier to take command. Tap anywhere to turn on sound.', 4500);
 requestAnimationFrame(frame);
 })();
 </script>
