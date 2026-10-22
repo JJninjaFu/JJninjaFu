@@ -32,6 +32,9 @@ button:hover { border-color: #4a5462; }
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 button.on { background: var(--brass); color: #1a1408; border-color: var(--brass); }
 button.warn { border-color: #6b3a33; color: #f0b8ad; }
+button.dim { opacity: 0.55; }
+.slider.changed label::after { content: " · changed"; color: var(--brass); }
+.copybox { width: 100%; min-height: 90px; background: #10141a; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.4 ui-monospace, Menlo, monospace; padding: 6px; }
 select { background: #232a34; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-height: 36px; }
 
 .topbar { position: absolute; top: 8px; left: 0; right: 0; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; justify-content: space-between; pointer-events: none; }
@@ -100,7 +103,8 @@ table.rep td.n { text-align: right; }
   <header class="topbar">
     <div class="brand">
       <h1>Plateau Sandbox</h1>
-      <div class="sub">Meridian vs Grey Coats · field test</div>
+      <div class="sub">Empire vs Faithful · field test</div>
+      <div class="perf" id="supply"></div>
       <div class="perf" id="perf">measuring…</div>
     </div>
     <div class="controls">
@@ -113,8 +117,8 @@ table.rep td.n { text-align: right; }
       <label class="lbl" for="aiSel">Auto-battle
         <select id="aiSel">
           <option value="off">Off</option>
-          <option value="grey" selected>Grey Coats</option>
-          <option value="blue">Meridian</option>
+          <option value="grey" selected>Faithful</option>
+          <option value="blue">Empire</option>
           <option value="both">Both</option>
         </select>
       </label>
@@ -164,13 +168,30 @@ const DEFAULT_TYPES = {
   commander: { name: 'Command Staff',      tag: 'CMD', men: 3, hp: 110, speed: 3.4, range: 18, damage: 22,  accuracy: 0.45, reload: 3,    suppress: 3, aura: 22 },
   hover:     { name: 'Hover Skiff',        tag: 'SKF', men: 1, hp: 700, speed: 9,   range: 0,  damage: 0,   accuracy: 0,    reload: 1,    suppress: 0, carry: 10, armor: 0.35, vehicle: true },
 };
-const DEFAULT_WORLD = { repairRate: 1.2, rampRate: 1.6, maxSlope: 0.9, craterScale: 1, craterDepth: 1.3, baseRadius: 20, baseMinDamage: 0.15 };
+const COST_TIME = { rifle: [100, 14], sapper: [80, 12], crank: [160, 20], mortar: [180, 22], cannon: [260, 28], cavalry: [220, 24], commander: [200, 26], hover: [240, 26] };
+for (const t in COST_TIME) { DEFAULT_TYPES[t].cost = COST_TIME[t][0]; DEFAULT_TYPES[t].build = COST_TIME[t][1]; }
+const DEFAULT_BUILD = {
+  hq:       { name: 'Headquarters', hp: 2500, cost: 400, build: 60, r: 7.5, makes: ['sapper', 'commander', 'hover'] },
+  barracks: { name: 'Barracks',     hp: 1600, cost: 200, build: 40, r: 6,   makes: ['rifle', 'crank', 'mortar', 'cannon', 'cavalry'] },
+  turret:   { name: 'Turret',       hp: 700,  cost: 150, build: 25, r: 2.2, range: 42, damage: 20, accuracy: 0.4, reload: 1.1, suppress: 3 },
+};
+const BUILD_NAMES = { hq: { blue: 'Cloning Vats', grey: 'Sanctum' }, barracks: { blue: 'Barracks', grey: 'Chapter House' }, turret: { blue: 'Auto-Turret', grey: 'Bastion' } };
+// Empire: cheap, fast clones who rattle easily. Faithful: costly, tougher, sharper, nearly unbreakable.
+const DEFAULT_FACTION = {
+  blue: { cost: 0.8, build: 0.8, hp: 1, accuracy: 1, morale: 1.15 },
+  grey: { cost: 1.2, build: 1.1, hp: 1.15, accuracy: 1.12, morale: 0.75 },
+};
+const DEFAULT_WORLD = { repairRate: 1.2, rampRate: 1.6, maxSlope: 0.9, craterScale: 1, craterDepth: 1.3, baseRadius: 20, baseMinDamage: 0.15, income: 3, startSupply: 400 };
 const TYPE_ORDER = ['rifle', 'sapper', 'crank', 'mortar', 'cannon', 'cavalry', 'commander', 'hover'];
 const UNIT_FIELDS = [
   ['men', 'Men per squad (new squads)', 1, 9, 1], ['hp', 'Health per man (new squads)', 20, 400, 5],
   ['speed', 'Speed, m/s', 0.5, 12, 0.1], ['range', 'Range, m', 2, 120, 1], ['damage', 'Damage per hit', 1, 250, 1],
   ['accuracy', 'Accuracy', 0.02, 1, 0.01], ['reload', 'Reload, seconds', 0.05, 15, 0.05], ['suppress', 'Morale hit per shot', 0, 20, 0.5],
+  ['cost', 'Supply cost', 0, 600, 10], ['build', 'Training time, seconds', 1, 90, 1],
 ];
+const BUILD_FIELDS = [['hp', 'Health', 100, 6000, 50], ['cost', 'Supply cost', 0, 800, 10], ['build', 'Build time with a full Sapper squad, s', 2, 180, 1]];
+const TURRET_FIELDS = [['range', 'Range, m', 5, 120, 1], ['damage', 'Damage per hit', 1, 150, 1], ['accuracy', 'Accuracy', 0.02, 1, 0.01], ['reload', 'Reload, seconds', 0.1, 10, 0.1]];
+const FACTION_FIELDS = [['cost', 'Unit and building cost ×', 0.3, 2, 0.05], ['build', 'Training and building time ×', 0.3, 2, 0.05], ['hp', 'Health ×', 0.5, 2, 0.05], ['accuracy', 'Accuracy ×', 0.5, 2, 0.05], ['morale', 'Morale damage taken ×', 0.2, 2, 0.05]];
 const EXTRA_FIELDS = { splash: ['splash', 'Blast radius, m', 1, 12, 0.5], aura: ['aura', 'Aura radius, m', 0, 50, 1], carry: ['carry', 'Passenger seats', 2, 20, 1], armor: ['armor', 'Small-arms damage taken (armor)', 0.05, 1, 0.05] };
 const WORLD_FIELDS = [
   ['repairRate', 'Crater repair, m³ per sapper per second', 0.1, 6, 0.1],
@@ -180,22 +201,36 @@ const WORLD_FIELDS = [
   ['craterDepth', 'Crater depth, m', 0.2, 4, 0.1],
   ['baseRadius', 'Base protection radius, m', 0, 40, 1],
   ['baseMinDamage', 'Terrain damage at base center (0 to 1)', 0, 1, 0.05],
+  ['income', 'Supply income per second, each side', 0, 20, 0.5],
+  ['startSupply', 'Starting supply (on restart)', 0, 3000, 50],
 ];
 const TYPES = JSON.parse(JSON.stringify(DEFAULT_TYPES));
 const WORLD = Object.assign({}, DEFAULT_WORLD);
-const STORE_KEY = 'plateauSandbox.tune.v2';
+const BUILD = JSON.parse(JSON.stringify(DEFAULT_BUILD));
+const FACTION = JSON.parse(JSON.stringify(DEFAULT_FACTION));
+const STORE_KEY = 'plateauSandbox.tune.v3';
 try {
   const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
   if (saved) {
     for (const t in saved.types || {}) if (TYPES[t]) Object.assign(TYPES[t], saved.types[t]);
+    for (const k in saved.build || {}) if (BUILD[k]) Object.assign(BUILD[k], saved.build[k]);
+    for (const f in saved.faction || {}) if (FACTION[f]) Object.assign(FACTION[f], saved.faction[f]);
     Object.assign(WORLD, saved.world || {});
   }
 } catch (e) { /* storage unavailable */ }
-function saveTune() { try { localStorage.setItem(STORE_KEY, JSON.stringify({ types: TYPES, world: WORLD })); } catch (e) { /* ignore */ } }
+function saveTune() { try { localStorage.setItem(STORE_KEY, JSON.stringify({ types: TYPES, world: WORLD, build: BUILD, faction: FACTION })); } catch (e) { /* ignore */ } }
+const DEFAULTS = new Map([[WORLD, DEFAULT_WORLD]]);
+for (const t in TYPES) DEFAULTS.set(TYPES[t], DEFAULT_TYPES[t]);
+for (const k in BUILD) DEFAULTS.set(BUILD[k], DEFAULT_BUILD[k]);
+for (const f in FACTION) DEFAULTS.set(FACTION[f], DEFAULT_FACTION[f]);
+const costOf = (type, team) => Math.round(TYPES[type].cost * FACTION[team].cost);
+const trainTime = (type, team) => Math.max(1, TYPES[type].build * FACTION[team].build);
+const bCost = (kind, team) => Math.round(BUILD[kind].cost * FACTION[team].cost);
+const nameOf = (type, team) => TYPES[type] ? TYPES[type].name : BUILD_NAMES[type] ? BUILD_NAMES[type][team] : type;
 
 const TEAM = {
-  blue: { name: 'Meridian', css: '#5b8cf0', coat: 0x22335e, trou: 0x6c8fc6, cap: 0x22335e },
-  grey: { name: 'Grey Coats', css: '#cfc6b6', coat: 0x8f8b82, trou: 0x6e6455, cap: 0x8a8379 },
+  blue: { name: 'Empire', css: '#5b8cf0', coat: 0x22335e, trou: 0x6c8fc6, cap: 0x22335e },
+  grey: { name: 'Faithful', css: '#cfc6b6', coat: 0x8f8b82, trou: 0x6e6455, cap: 0x8a8379 },
 };
 const ENEMY = { blue: 'grey', grey: 'blue' };
 
@@ -345,8 +380,10 @@ function cellOf(x, z) { return [clamp(Math.round(gx(x)), 0, N - 1), clamp(Math.r
 function lineWalkable(ax, az, bx, bz, slope = WORLD.maxSlope) {
   const L = dist(ax, az, bx, bz), steps = Math.max(1, Math.ceil(L / (CELL * 0.5)));
   let ph = hAt(ax, az);
+  const startBlocked = blocked[I(clamp(Math.round(gx(ax)), 0, N - 1), clamp(Math.round(gx(az)), 0, N - 1))];
   for (let s = 1; s <= steps; s++) {
     const t = s / steps, x = lerp(ax, bx, t), z = lerp(az, bz, t), h = hAt(x, z);
+    if (!startBlocked && blocked[I(clamp(Math.round(gx(x)), 0, N - 1), clamp(Math.round(gx(z)), 0, N - 1))]) return false;
     if (Math.abs(h - ph) / (L / steps) > slope * 1.08) return false;
     ph = h;
   }
@@ -376,6 +413,7 @@ function findPath(sx, sz, tx, tz, slope = WORLD.maxSlope) {
       if (ni < 0 || nj < 0 || ni >= N || nj >= N) continue;
       const n = I(ni, nj);
       if (closed[n] === curStamp) continue;
+      if (blocked[n] && !blocked[k] && n !== goal) continue;
       const step = dd * CELL, dh = Math.abs(H[n] - H[k]);
       if (dh / step > maxS) continue;
       const g = gScore[k] + step * (1 + 0.8 * dh / step);
@@ -527,7 +565,8 @@ function updateEffects(dt) {
 
 // =============================================================== game state
 const squads = [], guns = [], projectiles = [], selected = new Set();
-let simTime = 0, timeScale = 1, aiMode = 'grey', toolMode = null, rampA = null, spawnTeam = 'blue', spawnType = 'rifle', placing = false;
+let simTime = 0, timeScale = 1, aiMode = 'grey', toolMode = null, rampA = null, spawnTeam = 'blue', spawnType = 'rifle', placing = false, selB = null;
+const supply = { blue: 0, grey: 0 };
 const stats = {};
 function stat(team, type) { const k = team + ':' + type; return stats[k] || (stats[k] = { team, type, squads: 0, men: 0, lost: 0, kills: 0, shots: 0, hits: 0 }); }
 
@@ -535,7 +574,7 @@ let SQID = 1;
 class Soldier {
   constructor(sq, k, x, z) {
     this.sq = sq; this.k = k; this.x = x; this.z = z; this.y = hAt(x, z);
-    this.hp = sq.S.hp; this.alive = true; this.reload = rand(0.2, 1) * sq.S.reload; this.heading = sq.heading;
+    this.hp = sq.S.hp * FACTION[sq.team].hp; this.alive = true; this.reload = rand(0.2, 1) * sq.S.reload; this.heading = sq.heading;
     this.mesh = makeSoldier(sq.type, sq.team); this.deadT = 0; this.moving = false; this.charge = 0;
   }
 }
@@ -597,9 +636,185 @@ function clearUnits() {
 }
 function scenario() {
   clearUnits();
+  for (const bd of buildings) { scene.remove(bd.mesh); if (!bd.dead) markBlocked(bd, -1); }
+  buildings.length = 0; selB = null;
+  supply.blue = supply.grey = WORLD.startSupply;
+  new Building('hq', 'blue', 0, -138, true); new Building('barracks', 'blue', -24, -128, true); new Building('turret', 'blue', 14, -98, true);
+  new Building('hq', 'grey', 0, 138, true); new Building('barracks', 'grey', 24, 128, true); new Building('turret', 'grey', -14, 98, true);
   const b = (t, x, z) => spawnSquad(t, 'blue', x, z), g = (t, x, z) => spawnSquad(t, 'grey', x, z);
   b('commander', 0, -110); b('rifle', -14, -100); b('rifle', 14, -100); b('sapper', -30, -108); b('cannon', 4, -116); b('crank', -4, -102); b('hover', 26, -112);
   g('rifle', -14, 100); g('rifle', 14, 100); g('mortar', 0, 114); g('cavalry', 30, 104); g('crank', 4, 102); g('sapper', 28, 112); g('hover', -26, 112);
+}
+
+// =============================================================== buildings and supply
+const buildings = [];
+let BID = 1;
+const blocked = new Uint8Array(N * N);
+function markBlocked(b, v) {
+  const r = b.B.r + 0.6;
+  const i0 = Math.max(0, Math.floor(gx(b.x - r))), i1 = Math.min(N - 1, Math.ceil(gx(b.x + r)));
+  const j0 = Math.max(0, Math.floor(gx(b.z - r))), j1 = Math.min(N - 1, Math.ceil(gx(b.z + r)));
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (Math.hypot(wx(i) - b.x, wx(j) - b.z) <= r) blocked[I(i, j)] = Math.max(0, blocked[I(i, j)] + v);
+}
+const BGEO = {
+  slab: new THREE.BoxGeometry(14, 0.6, 10), wall: new THREE.BoxGeometry(14, 5, 1), vat: new THREE.CylinderGeometry(1.3, 1.3, 4.2, 16),
+  liquid: new THREE.CylinderGeometry(1.08, 1.08, 3.4, 16), cap: new THREE.CylinderGeometry(1.42, 1.42, 0.4, 16), pipe: new THREE.CylinderGeometry(0.22, 0.22, 10, 8),
+  hall: new THREE.BoxGeometry(11, 4, 7), roof: new THREE.BoxGeometry(11.6, 0.25, 4.3), door: new THREE.BoxGeometry(2.4, 2.8, 0.2),
+  spire: new THREE.ConeGeometry(0.9, 4, 8), tBase: new THREE.CylinderGeometry(1.5, 1.9, 1.4, 12), tHead: new THREE.BoxGeometry(1.5, 1.0, 1.7), tBarrel: new THREE.CylinderGeometry(0.11, 0.11, 2.1, 8),
+};
+const BMAT = { clone: new THREE.MeshBasicMaterial({ color: 0x6bff9c }), flame: new THREE.MeshBasicMaterial({ color: 0xffc46b }), stone: M(0x8a8273), dark: M(0x1b1d21) };
+function makeBuilding(kind, team) {
+  const g = new THREE.Group(), tm = TMAT[team], faith = team === 'grey';
+  if (kind === 'hq') {
+    addMesh(g, BGEO.slab, faith ? BMAT.stone : MAT.hull, 0, 0.3, 0);
+    addMesh(g, BGEO.wall, tm.coat, 0, 2.8, -4.4);
+    for (const x of [-4, 0, 4]) {
+      addMesh(g, BGEO.vat, MAT.glass, x, 2.7, 0.6);
+      addMesh(g, BGEO.liquid, faith ? BMAT.flame : BMAT.clone, x, 2.4, 0.6);
+      addMesh(g, BGEO.cap, MAT.iron, x, 4.95, 0.6);
+    }
+    addMesh(g, BGEO.pipe, MAT.iron, 0, 4.6, -2.2, 0, 0, Math.PI / 2);
+    if (faith) addMesh(g, BGEO.spire, MAT.gold, 0, 7.2, -4.4);
+  } else if (kind === 'barracks') {
+    addMesh(g, BGEO.hall, faith ? BMAT.stone : tm.coat, 0, 2, 0);
+    addMesh(g, BGEO.roof, MAT.hull, 0, 4.85, 1.85, 0.5);
+    addMesh(g, BGEO.roof, MAT.hull, 0, 4.85, -1.85, -0.5);
+    addMesh(g, BGEO.door, BMAT.dark, 0, 1.4, 3.55);
+    if (faith) addMesh(g, BGEO.spire, MAT.gold, 0, 7.2, 0);
+  } else {
+    addMesh(g, BGEO.tBase, faith ? BMAT.stone : MAT.iron, 0, 0.7, 0);
+    const head = new THREE.Group(); head.position.y = 1.85; g.add(head);
+    addMesh(head, BGEO.tHead, tm.coat, 0, 0, 0);
+    for (const x of [-0.3, 0.3]) addMesh(head, BGEO.tBarrel, MAT.iron, x, 0.05, 1.5, Math.PI / 2);
+    g.userData.head = head;
+  }
+  scene.add(g);
+  return g;
+}
+class Building {
+  constructor(kind, team, x, z, done) {
+    this.id = BID++; this.kind = kind; this.team = team; this.x = x; this.z = z; this.B = BUILD[kind];
+    const E = BASES[ENEMY[team]];
+    this.heading = Math.round(Math.atan2(E.x - x, E.z - z) / (Math.PI / 2)) * (Math.PI / 2);
+    this.progress = done ? 1 : 0; this.hp = this.B.hp * (done ? 1 : 0.1); this.dead = false;
+    this.queue = []; this.prodT = 0; this.rally = null; this.reload = 0; this.aim = null;
+    this.y = hAt(x, z);
+    this.mesh = makeBuilding(kind, team);
+    this.mesh.traverse(o => { o.userData.building = this; });
+    this.shooter = { team, type: kind, pinned: false, auraK: false, carrier: null, dead: false };
+    buildings.push(this);
+    markBlocked(this, 1);
+  }
+  get name() { return BUILD_NAMES[this.kind][this.team]; }
+}
+function pickBuilding(cx, cy) {
+  const r = glCanvas.getBoundingClientRect();
+  ndc.set((cx - r.left) / r.width * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(buildings.filter(b => !b.dead).map(b => b.mesh), true)[0];
+  return hit ? hit.object.userData.building : null;
+}
+function selectBuilding(b) { selected.clear(); selB = b; refreshCmd(); }
+function siteProblem(kind, x, z) {
+  const r = BUILD[kind].r;
+  if (Math.abs(x) > HALF - r - 3 || Math.abs(z) > HALF - r - 3) return 'Too close to the edge of the map.';
+  for (const b of buildings) if (!b.dead && dist(b.x, b.z, x, z) < r + b.B.r + 1.5) return 'Too close to another building.';
+  let lo = 1e9, hi = -1e9;
+  for (let a = 0; a < 8; a++) for (const rr of [0, r * 0.6, r]) { const h = hAt(x + Math.cos(a * Math.PI / 4) * rr, z + Math.sin(a * Math.PI / 4) * rr); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+  if (hi - lo > 3) return 'The ground there is too uneven.';
+  return null;
+}
+function queueUnit(b, type, quiet) {
+  const say = t => { if (!quiet) toast(t, 2400); };
+  if (b.dead || b.progress < 1) return say('That building is not finished yet.');
+  if (b.queue.length >= 5) return say('The queue is full (5 squads).');
+  const c = costOf(type, b.team);
+  if (supply[b.team] < c) return say(`Not enough supply: ${TYPES[type].name} cost ${c}.`);
+  supply[b.team] -= c;
+  b.queue.push(type);
+  if (!quiet) { sfx('click', b.x, b.z); refreshCmd(); }
+}
+function cancelLast(b) {
+  const t = b.queue.pop();
+  if (t) { supply[b.team] += costOf(t, b.team); if (!b.queue.length) b.prodT = 0; }
+  refreshCmd();
+}
+function damageBuilding(b, dmg, src) {
+  if (b.dead) return;
+  b.hp -= dmg;
+  if (b.hp <= 0) destroyBuilding(b, src);
+}
+function destroyBuilding(b, src) {
+  b.dead = true;
+  scene.remove(b.mesh);
+  markBlocked(b, -1);
+  if (selB === b) selB = null;
+  if (src && !src.dead) stat(src.team, src.type).kills += 3;
+  crater(b.x, b.z, b.B.r * 0.6, 0.8);
+  sfx('boom', b.x, b.z);
+  puff(flashTex, b.x, b.y + 2, b.z, 12, 0.4, 0, true);
+  for (let n = 0; n < 12; n++) puff(smokeTex, b.x + rand(-b.B.r, b.B.r), b.y + rand(1, 5), b.z + rand(-b.B.r, b.B.r), rand(5, 9), rand(2.5, 4.5), rand(0.8, 1.8));
+  toast(`${TEAM[b.team].name} ${b.name} destroyed.`, 2600);
+  refreshCmd();
+}
+function shootBuilding(sq, from, b, S, snd) {
+  const st = stat(sq.team, sq.type);
+  st.shots++;
+  sfx(snd || 'musket', from.x, from.z);
+  const hit = Math.random() < clamp(S.accuracy * 1.6, 0.05, 0.97);
+  const a = Math.atan2(from.x - b.x, from.z - b.z), rr = b.B.r * 0.8;
+  const miss = hit ? 0 : 3;
+  addTracer([from.x, from.y + 1.4, from.z], [b.x + Math.sin(a) * rr + rand(-miss, miss), b.y + rand(0.8, 3), b.z + Math.cos(a) * rr + rand(-miss, miss)], sq.team === 'blue' ? [1, 0.95, 0.7] : [1, 0.8, 0.6]);
+  if (hit) { st.hits++; damageBuilding(b, S.damage * 0.3, sq); }
+}
+function autoBuilding(sq) {
+  const WS = sq.WS;
+  if (WS.range <= 0 || sq.type === 'cavalry') return null;
+  let best = null, bd = 1e9;
+  for (const b of buildings) {
+    if (b.dead || b.team === sq.team) continue;
+    const d = dist(b.x, b.z, sq.px, sq.pz) - b.B.r;
+    if (d <= WS.range && d < bd) { bd = d; best = b; }
+  }
+  return best;
+}
+function workBuild(sq, dt, crew) {
+  const b = sq.order.b;
+  b.progress = Math.min(1, b.progress + dt * (crew / 4) / Math.max(1, b.B.build * FACTION[b.team].build));
+  b.hp = Math.max(b.hp, b.B.hp * (0.1 + 0.9 * b.progress));
+  sq.order.left = null;
+  if (b.progress >= 1) { setOrder(sq, null); toast(`${TEAM[b.team].name} ${b.name} finished.`, 2400); refreshCmd(); }
+}
+function updateBuildings(dt) {
+  for (const b of buildings) {
+    if (b.dead || b.progress < 1) continue;
+    if (b.queue.length) {
+      b.prodT += dt;
+      if (b.prodT >= trainTime(b.queue[0], b.team)) {
+        const type = b.queue.shift(), d = b.B.r + 3.5;
+        b.prodT = 0;
+        const x = b.x + Math.sin(b.heading) * d + rand(-2, 2), z = b.z + Math.cos(b.heading) * d + rand(-2, 2);
+        const sq = spawnSquad(type, b.team, x, z);
+        sq.heading = b.heading;
+        if (b.rally) setOrder(sq, { k: 'move', x: b.rally[0] + rand(-4, 4), z: b.rally[1] + rand(-4, 4) });
+      }
+    }
+    if (b.kind === 'turret') {
+      b.reload -= dt;
+      let best = null, bd = 1e9;
+      for (const sq of squads) {
+        if (sq.dead || sq.team === b.team) continue;
+        for (const m of sq.members) { if (!m.alive) continue; const d = dist(m.x, m.z, b.x, b.z); if (d < bd) { bd = d; best = m; } }
+      }
+      if (best && bd <= effRange(b.B, b.y + 2, best.y)) {
+        b.aim = Math.atan2(best.x - b.x, best.z - b.z);
+        if (b.reload <= 0) {
+          fireShot(b.shooter, { x: b.x + Math.sin(b.aim) * 1.6, y: b.y + 0.5, z: b.z + Math.cos(b.aim) * 1.6 }, best, b.B, 'crank');
+          b.reload = b.B.reload * rand(0.9, 1.1);
+        }
+      }
+    }
+  }
 }
 
 // =============================================================== combat helpers
@@ -610,7 +825,7 @@ function inCover(m) {
 }
 function suppress(sq, amt) {
   if (sq.dead || amt <= 0) return;
-  sq.morale = Math.max(0, sq.morale - amt * (sq.auraC ? 0.6 : 1));
+  sq.morale = Math.max(0, sq.morale - amt * (sq.auraC ? 0.6 : 1) * FACTION[sq.team].morale);
   sq.supT = 0;
 }
 function kill(m, src) {
@@ -639,6 +854,7 @@ function hitChance(S, sh, tm, d, sq) {
   if (inCover(tm)) p *= 0.55;
   if (sq.pinned) p *= 0.6;
   if (sq.auraK) p *= 1.1;
+  p *= FACTION[sq.team] ? FACTION[sq.team].accuracy : 1;
   return clamp(p, 0.02, 0.97);
 }
 function fireShot(sq, from, tm, S, snd) {
@@ -680,6 +896,11 @@ function explode(x, z, S, src, craterR, depthMul) {
       if (d < S.splash) { damage(m, S.damage * Math.pow(1 - d / S.splash, 0.7), src); anyHit = true; }
     }
     if (near < S.splash * 2.5) suppress(sq, 30 * (1 - near / (S.splash * 2.5)));
+  }
+  for (const b of buildings) {
+    if (b.dead) continue;
+    const d = Math.max(0, dist(b.x, b.z, x, z) - b.B.r);
+    if (d < S.splash) damageBuilding(b, S.damage * 1.2 * (1 - d / S.splash), src);
   }
   if (anyHit && src) stat(src.team, src.type).hits++;
   crater(x, z, craterR, depthMul);
@@ -776,7 +997,7 @@ function updateSquad(sq, dt) {
   // decide goal
   const o = sq.order;
   let goal = null, hold = false, fireAt = null, working = false;
-  let tgt = null;
+  let tgt = null, tgtB = null;
   if (o && o.k === 'attack') {
     if (o.t.dead) setOrder(sq, null);
     else {
@@ -795,12 +1016,19 @@ function updateSquad(sq, dt) {
     if (o.t.dead) setOrder(sq, null);
     else if (dist(sq.px, sq.pz, o.t.px, o.t.pz) > 5) goal = [o.t.px, o.t.pz];
     else if (!embark(sq, o.t)) { setOrder(sq, null); sq.status = 'Not enough seats on that skiff.'; }
+  } else if (o && o.k === 'attackB') {
+    if (o.b.dead) setOrder(sq, null);
+    else { const d = dist(sq.px, sq.pz, o.b.x, o.b.z) - o.b.B.r; if (d > WS.range * 0.9 || sq.type === 'cavalry') goal = [o.b.x, o.b.z]; else tgtB = o.b; }
+  } else if (o && o.k === 'build') {
+    if (o.b.dead || o.b.progress >= 1) setOrder(sq, null);
+    else if (dist(sq.px, sq.pz, o.b.x, o.b.z) > o.b.B.r + 4) goal = [o.b.x, o.b.z]; else working = true;
   } else if (o && o.k === 'repair') {
     if (dist(sq.px, sq.pz, o.x, o.z) > 3.5) goal = [o.x, o.z]; else working = true;
   } else if (o && o.k === 'ramp') {
     if (dist(sq.px, sq.pz, o.ax, o.az) > 4 && !o.started) goal = [o.ax, o.az]; else { o.started = true; working = true; }
   }
   if (!tgt && !fireAt && !working && (!goal || !o || o.k !== 'move' || o.atk)) tgt = autoTarget(sq);
+  if (!tgt && !tgtB && !fireAt && !working && !goal) tgtB = autoBuilding(sq);
   if (!goal && !tgt) hold = true;
   sq.autoTarget = tgt;
 
@@ -838,6 +1066,7 @@ function updateSquad(sq, dt) {
   let aimSq = tgt, aim = null;
   if (aimSq) { const [m] = nearestMember(aimSq, sq.px, sq.pz); if (m) aim = [m.x, m.z]; }
   if (fireAt) aim = fireAt;
+  if (!aim && tgtB) aim = [tgtB.x, tgtB.z];
   if (aim && !sq.moving) sq.heading = Math.atan2(aim[0] - sq.px, aim[1] - sq.pz);
 
   // gun follows its crew anchor
@@ -851,6 +1080,7 @@ function updateSquad(sq, dt) {
   const n = al.length, cav = sq.type === 'cavalry';
   let workCenter = null;
   if (working && o.k === 'repair') workCenter = [o.x, o.z];
+  if (working && o.k === 'build') workCenter = [o.b.x, o.b.z];
   let seat0 = 0;
   if (sq.carrier) for (const c of sq.carrier.cargo) { if (c === sq) break; if (!c.dead) seat0 += c.alive.length; }
   for (let idx = 0; idx < n; idx++) {
@@ -871,6 +1101,7 @@ function updateSquad(sq, dt) {
     }
     let [sx, sz] = slotOf(sq, idx, n);
     if (working && o.k === 'repair') { const a = idx / n * Math.PI * 2 + simTime * 0.05; sx = o.x + Math.cos(a) * (o.r * 0.7); sz = o.z + Math.sin(a) * (o.r * 0.7); }
+    if (working && o.k === 'build') { const a = idx / n * Math.PI * 2; sx = o.b.x + Math.cos(a) * (o.b.B.r + 1.6); sz = o.b.z + Math.sin(a) * (o.b.B.r + 1.6); }
     if (working && o.k === 'ramp') { const t = (idx + 0.5) / n; sx = lerp(o.ax, o.bx, t * 0.85) + (idx % 2 ? 1 : -1) * 3.2 * Math.cos(Math.atan2(o.bx - o.ax, o.bz - o.az)); sz = lerp(o.az, o.bz, t * 0.85) - (idx % 2 ? 1 : -1) * 3.2 * Math.sin(Math.atan2(o.bx - o.ax, o.bz - o.az)); }
     let enemyM = null;
     if (cav && tgt) { const [em, ed] = nearestMember(tgt, m.x, m.z); if (em && ed < 30) { enemyM = em; sx = em.x; sz = em.z; } }
@@ -910,6 +1141,12 @@ function updateSquad(sq, dt) {
             puff(smokeTex, m.x + Math.sin(m.heading) * 0.8, m.y + 1.4, m.z + Math.cos(m.heading) * 0.8, 1.6, 1.6, 0.35);
             m.reload = S.reload * rand(0.85, 1.15);
           } else m.reload = 0.25;
+        } else if (!cav && !tgt && tgtB && !m.moving && !working) {
+          if (dist(m.x, m.z, tgtB.x, tgtB.z) - tgtB.B.r <= effRange(S, m.y, tgtB.y)) {
+            shootBuilding(sq, m, tgtB, S);
+            puff(smokeTex, m.x + Math.sin(m.heading) * 0.8, m.y + 1.4, m.z + Math.cos(m.heading) * 0.8, 1.6, 1.6, 0.35);
+            m.reload = S.reload * rand(0.85, 1.15);
+          } else m.reload = 0.25;
         } else m.reload = Math.max(m.reload, 0);
       }
     }
@@ -928,9 +1165,15 @@ function updateSquad(sq, dt) {
           gun.shots++; gun.reload = WS.reload + (gun.shots % 25 === 0 ? 2.5 : 0);
           if (gun.shots % 3 === 0) puff(smokeTex, gun.x + Math.sin(gun.heading) * 1.4, hAt(gun.x, gun.z) + 1, gun.z + Math.cos(gun.heading) * 1.4, 1.4, 0.9, 0.5);
         }
+      } else if (gun.kind === 'crank' && tgtB) {
+        if (dist(gun.x, gun.z, tgtB.x, tgtB.z) - tgtB.B.r <= WS.range) {
+          shootBuilding(sq, { x: gun.x + Math.sin(gun.heading) * 0.9, z: gun.z + Math.cos(gun.heading) * 0.9, y: hAt(gun.x, gun.z) - 0.4 }, tgtB, WS, 'crank');
+          gun.shots++; gun.reload = WS.reload + (gun.shots % 25 === 0 ? 2.5 : 0);
+        }
       } else if (gun.kind !== 'crank') {
         let p = fireAt;
         if (!p && tgt) { const c = tgt.centroid(); p = c; }
+        if (!p && tgtB) p = [tgtB.x, tgtB.z];
         if (p) {
           const d = dist(gun.x, gun.z, p[0], p[1]);
           const minR = gun.kind === 'mortar' ? 14 : 4;
@@ -951,6 +1194,7 @@ function updateSquad(sq, dt) {
     sq.digT -= dt;
     if (sq.digT <= 0) { sq.digT = rand(0.35, 0.7); const w = al[(Math.random() * n) | 0]; sfx('dig', w.x, w.z); }
     if (o.k === 'repair') workRepair(sq, dt, n);
+    else if (o.k === 'build') workBuild(sq, dt, n);
     else workRamp(sq, dt, n);
   }
   if (gun && gun.blocked) sq.status = 'No line of sight to the target.';
@@ -1008,7 +1252,22 @@ function findCrater(x, z, r) {
   }
   return best;
 }
+const AI_WEIGHTS = { rifle: 5, sapper: 1, crank: 2, mortar: 1.5, cannon: 1, cavalry: 1.5, commander: 0.5 };
+function aiProduce(team) {
+  const mine = squads.filter(s => !s.dead && s.team === team);
+  if (mine.length >= 16) return;
+  for (const b of buildings) {
+    if (b.dead || b.team !== team || b.progress < 1 || !b.B.makes || b.queue.length >= 2) continue;
+    const opts = b.B.makes.filter(t => AI_WEIGHTS[t] && costOf(t, team) <= supply[team]
+      && !(t === 'commander' && mine.some(s => s.type === 'commander')) && !(t === 'sapper' && mine.filter(s => s.type === 'sapper').length >= 2));
+    if (!opts.length) continue;
+    let r = Math.random() * opts.reduce((a, t) => a + AI_WEIGHTS[t], 0), pick = opts[0];
+    for (const t of opts) { r -= AI_WEIGHTS[t]; if (r <= 0) { pick = t; break; } }
+    queueUnit(b, pick, true);
+  }
+}
 function runAI() {
+  for (const team of aiTeams()) aiProduce(team);
   for (const team of aiTeams()) {
     for (const sq of squads) {
       if (sq.dead || sq.team !== team || selected.has(sq) || sq.S.vehicle || sq.carrier) continue;
@@ -1016,6 +1275,8 @@ function runAI() {
       if (sq.order && sq.order.k === 'move' && !sq.order.ai) continue;
       const foes = enemiesOf(sq);
       if (sq.type === 'sapper' && !sq.weapon) {
+        const ub = buildings.find(b => !b.dead && b.team === team && b.progress < 1);
+        if (ub) { setOrder(sq, { k: 'build', b: ub }); continue; }
         const c = findCrater(sq.px, sq.pz, 30);
         if (c) { setOrder(sq, { k: 'repair', x: c[0], z: c[1], r: 4.5 }); continue; }
       }
@@ -1031,7 +1292,12 @@ function runAI() {
       }
       let t = null, td = 1e9;
       for (const f of foes) { const d = dist(f.px, f.pz, sq.px, sq.pz); if (d < td) { td = d; t = f; } }
-      if (!t) continue;
+      if (!t) {
+        let eb = null, ed = 1e9;
+        for (const b of buildings) if (!b.dead && b.team !== team) { const d = dist(b.x, b.z, sq.px, sq.pz); if (d < ed) { ed = d; eb = b; } }
+        if (eb && sq.type !== 'cavalry') setOrder(sq, { k: 'attackB', b: eb });
+        continue;
+      }
       if (sq.weapon && sq.weapon.kind !== 'crank') {
         if (td > sq.WS.range * 0.9) { const k = (td - sq.WS.range * 0.8) / td; setOrder(sq, { k: 'move', x: sq.px + (t.px - sq.px) * k, z: sq.pz + (t.pz - sq.pz) * k, atk: true, ai: true }); }
         continue;
@@ -1086,6 +1352,7 @@ function pickSquad(cx, cy, radius) {
 }
 function selTeam() { const f = selected.values().next().value; return f ? f.team : null; }
 function select(sq, add) {
+  selB = null;
   if (!add) selected.clear();
   if (sq) { if (add && selected.size && selTeam() !== sq.team) selected.clear(); selected.add(sq); }
   refreshCmd();
@@ -1103,6 +1370,13 @@ function commandAt(cx, cy, attackMove) {
   }
   const leaveIfRiding = sq => { if (sq.carrier && !selected.has(sq.carrier)) disembark(sq, false); };
   if (hitSq && hitSq.team !== team) { orderSelected(sq => { if (sq.carrier && selected.has(sq.carrier)) return; leaveIfRiding(sq); setOrder(sq, { k: 'attack', t: hitSq }); }); markAt(hitSq.px, hitSq.pz, '#d4574a'); return true; }
+  const hitB = hitSq ? null : pickBuilding(cx, cy);
+  if (hitB && hitB.team !== team) { orderSelected(sq => { if (sq.carrier && selected.has(sq.carrier)) return; leaveIfRiding(sq); setOrder(sq, { k: 'attackB', b: hitB }); }); markAt(hitB.x, hitB.z, '#d4574a'); return true; }
+  if (hitB && hitB.progress < 1) {
+    let any = false;
+    orderSelected(sq => { if (sq.type === 'sapper' && !sq.weapon && !sq.carrier) { setOrder(sq, { k: 'build', b: hitB }); any = true; } });
+    if (any) { markAt(hitB.x, hitB.z, '#d3aa52'); return true; }
+  }
   const g = groundAt(cx, cy);
   if (!g) return false;
   const list = [...selected].filter(s => !s.dead && !(s.carrier && selected.has(s.carrier))), n = list.length;
@@ -1118,9 +1392,13 @@ function commandAt(cx, cy, attackMove) {
 const marks = [];
 function markAt(x, z, color) { marks.push({ x, z, color, t: 0 }); sfx('click', x, z); }
 
+function setRally(cx, cy) {
+  const g = groundAt(cx, cy);
+  if (g && selB) { selB.rally = g; markAt(g[0], g[1], '#d3aa52'); refreshCmd(); }
+}
 function onTap(cx, cy, button, shift, isTouch) {
   if (toolMode) { useTool(cx, cy); return; }
-  if (button === 2) { commandAt(cx, cy, false); return; }
+  if (button === 2) { if (selB && !selected.size) setRally(cx, cy); else commandAt(cx, cy, false); return; }
   const sq = pickSquad(cx, cy, isTouch ? 34 : 24);
   if (sq) {
     if (selected.size && selTeam() !== sq.team) commandAt(cx, cy, false);
@@ -1128,6 +1406,14 @@ function onTap(cx, cy, button, shift, isTouch) {
     else select(sq, shift);
     return;
   }
+  const b = pickBuilding(cx, cy);
+  if (b) {
+    const sel = [...selected].filter(s => !s.dead);
+    if (sel.length && (selTeam() !== b.team || (b.progress < 1 && sel.some(s => s.type === 'sapper' && !s.weapon)))) commandAt(cx, cy, false);
+    else selectBuilding(b);
+    return;
+  }
+  if (selB && isTouch) { setRally(cx, cy); return; }
   if (isTouch && selected.size) commandAt(cx, cy, false);
   else select(null, false);
 }
@@ -1140,6 +1426,22 @@ function useTool(cx, cy) {
   if (toolMode === 'atkmove') { commandAt(cx, cy, true); setTool(null); return; }
   if (toolMode === 'repair') { for (const s of sappers) setOrder(s, { k: 'repair', x: g[0], z: g[1], r: 4.5 }); markAt(g[0], g[1], '#d3aa52'); setTool(null); refreshCmd(); return; }
   if (toolMode === 'fire') { orderSelected(s => { if (s.weapon && s.weapon.kind !== 'crank') setOrder(s, { k: 'fire', x: g[0], z: g[1] }); }); markAt(g[0], g[1], '#d4574a'); setTool(null); return; }
+  if (toolMode.startsWith('place:') || toolMode.startsWith('free:')) {
+    const kind = toolMode.split(':')[1], free = toolMode.startsWith('free:');
+    const team = free ? spawnTeam : (selTeam() || spawnTeam);
+    const why = siteProblem(kind, g[0], g[1]);
+    if (why) { toastPersist(why + ' Tap somewhere else.'); return; }
+    if (!free) {
+      const c = bCost(kind, team);
+      if (supply[team] < c) { setTool(null); toast(`Not enough supply: the ${BUILD_NAMES[kind][team]} costs ${c}.`, 2600); return; }
+      supply[team] -= c;
+    }
+    const b = new Building(kind, team, g[0], g[1], free);
+    if (!free) { for (const s of sappers) setOrder(s, { k: 'build', b }); setTool(null); }
+    markAt(g[0], g[1], '#d3aa52');
+    refreshCmd();
+    return;
+  }
   if (toolMode === 'rampA') { rampA = g; setTool('rampB'); return; }
   if (toolMode === 'rampB') {
     const o = { k: 'ramp', ax: rampA[0], az: rampA[1], bx: g[0], bz: g[1] };
@@ -1156,11 +1458,13 @@ const TOOL_TEXT = {
   rampB: 'Now tap the TOP of the ramp (up on the plateau).',
   fire: 'Tap the ground to bombard.',
   atkmove: 'Tap where to attack-move. Squads stop to fight anything in range.',
+  place: () => `Tap open, flat ground for the ${BUILD_NAMES[toolMode.split(':')[1]][selTeam() || spawnTeam]}.`,
+  free: () => `Tap the map to place a finished ${TEAM[spawnTeam].name} ${BUILD_NAMES[toolMode.split(':')[1]][spawnTeam]}.`,
 };
 function setTool(t) {
   toolMode = t;
   $('#shellBtn').classList.toggle('on', t === 'shell');
-  if (t) { const tx = TOOL_TEXT[t]; toastPersist(typeof tx === 'function' ? tx() : tx); } else hideToast();
+  if (t) { const tx = TOOL_TEXT[t] || TOOL_TEXT[t.split(':')[0]]; toastPersist(typeof tx === 'function' ? tx() : tx); } else hideToast();
   renderDrawer();
 }
 
@@ -1305,6 +1609,27 @@ function drawHUD() {
     c.fillStyle = sq.pinned ? '#d4574a' : mor < 0.55 ? '#e0a040' : '#7fb069'; c.fillRect(bx, by + bh, bw * mor, 4);
     if (sq.pinned) { c.fillStyle = '#d4574a'; c.textAlign = 'center'; c.fillText('PINNED', s[0], by - 7); }
   }
+  for (const b of buildings) {
+    if (b.dead) continue;
+    const s = toScreen(b.x, b.y + (b.kind === 'turret' ? 4 : 7.5), b.z);
+    if (!s) continue;
+    const sel = selB === b;
+    if (sel) ring(b.x, b.z, b.B.r + 1.5, 'rgba(211,170,82,0.95)');
+    const txt = b.progress < 1 ? `${b.name} ${Math.round(b.progress * 100)}%` : b.name;
+    const tw = Math.max(64, c.measureText(txt).width + 14), bh = 17, bx = s[0] - tw / 2, by = s[1] - bh;
+    c.fillStyle = sel ? 'rgba(40,33,18,0.95)' : 'rgba(17,20,26,0.78)'; c.fillRect(bx, by, tw, bh);
+    c.fillStyle = TEAM[b.team].css; c.fillRect(bx, by, 4, bh);
+    c.strokeStyle = sel ? '#d3aa52' : 'rgba(255,255,255,0.12)'; c.lineWidth = 1; c.strokeRect(bx + 0.5, by + 0.5, tw - 1, bh - 1);
+    c.fillStyle = '#ece4d2'; c.textAlign = 'left'; c.fillText(txt, bx + 8, by + bh / 2 + 1);
+    const hp = clamp(b.hp / b.B.hp, 0, 1);
+    c.fillStyle = 'rgba(0,0,0,0.6)'; c.fillRect(bx, by + bh, tw, 4);
+    c.fillStyle = hp < 0.35 ? '#d4574a' : '#7fb069'; c.fillRect(bx, by + bh, tw * hp, 4);
+    if (b.queue.length && b.progress >= 1) { c.fillStyle = '#d3aa52'; c.fillRect(bx, by + bh + 4, tw * clamp(b.prodT / trainTime(b.queue[0], b.team), 0, 1), 3); }
+    if (sel && b.rally) {
+      const r2 = toScreen(b.rally[0], hAt(b.rally[0], b.rally[1]) + 0.3, b.rally[1]), d0 = toScreen(b.x, b.y + 0.5, b.z);
+      if (r2 && d0) { c.setLineDash([5, 4]); c.strokeStyle = '#d3aa52'; c.beginPath(); c.moveTo(d0[0], d0[1]); c.lineTo(r2[0], r2[1]); c.stroke(); c.setLineDash([]); c.fillStyle = '#d3aa52'; c.beginPath(); c.arc(r2[0], r2[1], 5, 0, 7); c.fill(); }
+    }
+  }
   if (boxSel) {
     const r = glCanvas.getBoundingClientRect();
     c.strokeStyle = '#d3aa52'; c.lineWidth = 1; c.fillStyle = 'rgba(211,170,82,0.12)';
@@ -1330,10 +1655,12 @@ function refreshCmd() {
   const list = [...selected].filter(s => !s.dead);
   const info = $('#selInfo'), cmds = $('#cmds');
   cmds.textContent = '';
+  if (selB && selB.dead) selB = null;
+  if (selB && !list.length) { buildingPanel(info, cmds); return; }
   if (!list.length) {
     info.innerHTML = '<b>No squad selected.</b> <span class="st">Tap a soldier to select their squad, then tap the ground to move or an enemy to attack.</span>';
-    cmds.append(btn('Select all Meridian', () => { selected.clear(); squads.filter(s => !s.dead && s.team === 'blue').forEach(s => selected.add(s)); refreshCmd(); }),
-      btn('Select all Grey Coats', () => { selected.clear(); squads.filter(s => !s.dead && s.team === 'grey').forEach(s => selected.add(s)); refreshCmd(); }));
+    cmds.append(btn('Select all Empire', () => { selected.clear(); squads.filter(s => !s.dead && s.team === 'blue').forEach(s => selected.add(s)); refreshCmd(); }),
+      btn('Select all Faithful', () => { selected.clear(); squads.filter(s => !s.dead && s.team === 'grey').forEach(s => selected.add(s)); refreshCmd(); }));
     return;
   }
   if (list.length === 1) {
@@ -1349,7 +1676,11 @@ function refreshCmd() {
     info.innerHTML = `<b>${list.length} ${TEAM[list[0].team].name} squads</b> · ${list.reduce((s, q) => s + q.alive.length, 0)} men <span class="st">· tap ground to move, tap an enemy to attack</span>`;
   }
   cmds.append(btn('Attack-move', () => setTool('atkmove')), btn('Stop', () => orderSelected(s => setOrder(s, null))));
-  if (list.some(s => s.type === 'sapper' && !s.weapon)) cmds.append(btn('Fill crater', () => setTool('repair')), btn('Build ramp', () => setTool('rampA')));
+  if (list.some(s => s.type === 'sapper' && !s.weapon)) {
+    const tm = list[0].team;
+    cmds.append(btn('Fill crater', () => setTool('repair')), btn('Build ramp', () => setTool('rampA')));
+    for (const k of ['barracks', 'turret']) { const c = bCost(k, tm), b2 = btn(`${BUILD_NAMES[k][tm]} ${c}`, () => setTool('place:' + k)); if (supply[tm] < c) b2.classList.add('dim'); cmds.append(b2); }
+  }
   if (list.some(s => s.weapon && s.weapon.kind !== 'crank')) cmds.append(btn('Bombard ground', () => setTool('fire')));
   if (list.some(s => s.S.vehicle && s.cargo.length)) cmds.append(btn('Unload all', () => orderSelected(v => { for (const c of v.cargo.slice()) disembark(c, false); })));
   if (list.some(s => s.carrier)) cmds.append(btn('Hop off', () => orderSelected(s => disembark(s, false))));
@@ -1363,18 +1694,39 @@ function refreshCmd() {
   cmds.append(btn('Deselect', () => select(null, false)));
 }
 
+function buildingPanel(info, cmds) {
+  const b = selB;
+  let st;
+  if (b.progress < 1) st = `Under construction, ${Math.round(b.progress * 100)}%. Select Sappers, then tap it to build.`;
+  else if (b.queue.length) st = `Training ${TYPES[b.queue[0]].name}: ${Math.round(clamp(b.prodT / trainTime(b.queue[0], b.team), 0, 1) * 100)}%` + (b.queue.length > 1 ? ` · then ${b.queue.slice(1).map(t => TYPES[t].tag).join(', ')}` : '');
+  else if (b.kind === 'turret') st = 'Fires at enemies in range on its own.';
+  else st = 'Idle. Pick a unit below to train it.';
+  const rally = b.B.makes ? (b.rally ? ' · rally point set' : ' · tap the ground to set a rally point') : '';
+  info.innerHTML = `<b>${TEAM[b.team].name} ${b.name}</b> · health ${Math.max(0, Math.round(b.hp))}/${b.B.hp} · supply ${Math.floor(supply[b.team])}<br><span class="st">${st}${rally}</span>`;
+  if (b.progress >= 1 && b.B.makes) for (const t of b.B.makes) {
+    const c = costOf(t, b.team), bt = btn(`${TYPES[t].name} ${c}`, () => queueUnit(b, t));
+    if (supply[b.team] < c) bt.classList.add('dim');
+    cmds.append(bt);
+  }
+  if (b.queue.length) cmds.append(btn('Cancel last', () => cancelLast(b)));
+  cmds.append(btn('Deselect', () => { selB = null; refreshCmd(); }));
+}
+
 let drawer = null, tuneType = 'rifle';
 for (const b of document.querySelectorAll('[data-drawer]')) b.addEventListener('click', () => { drawer = drawer === b.dataset.drawer ? null : b.dataset.drawer; renderDrawer(); });
 $('#drawerClose').addEventListener('click', () => { drawer = null; renderDrawer(); });
 function sliderRow(obj, [key, label, min, max, step], onChange) {
-  const id = 'f_' + key + '_' + (obj === WORLD ? 'world' : tuneType);
+  const id = 'f_' + key + '_' + tuneType.replace(':', '_');
   const wrap = document.createElement('div'); wrap.className = 'slider';
+  const def = (DEFAULTS.get(obj) || {})[key];
+  const mark = () => wrap.classList.toggle('changed', def != null && Math.abs(obj[key] - def) > 1e-9);
+  mark();
   const lab = document.createElement('label'); lab.htmlFor = id; lab.textContent = label;
   const out = document.createElement('output'); out.htmlFor = id;
   const fmt = v => step >= 1 ? String(Math.round(v)) : (+v).toFixed(step < 0.1 ? 2 : 1);
   out.textContent = fmt(obj[key]);
   const inp = document.createElement('input'); inp.type = 'range'; inp.id = id; inp.min = min; inp.max = max; inp.step = step; inp.value = obj[key];
-  inp.addEventListener('input', () => { obj[key] = +inp.value; out.textContent = fmt(obj[key]); saveTune(); if (onChange) onChange(); });
+  inp.addEventListener('input', () => { obj[key] = +inp.value; out.textContent = fmt(obj[key]); mark(); saveTune(); if (onChange) onChange(); });
   wrap.append(lab, out, inp);
   return wrap;
 }
@@ -1399,19 +1751,35 @@ function renderDrawer() {
     const act = document.createElement('div'); act.className = 'row';
     act.append(btn(toolMode === 'spawn' ? 'Placing: tap map' : 'Place on map', () => setTool(toolMode === 'spawn' ? null : 'spawn'), toolMode === 'spawn' ? 'on' : ''),
       btn('Spawn at base', () => { spawnAtBase(spawnType, spawnTeam); refreshCmd(); }));
+    const bRow = document.createElement('div'); bRow.className = 'row';
+    for (const k of ['hq', 'barracks', 'turret']) bRow.append(btn(BUILD_NAMES[k][spawnTeam], () => setTool(toolMode === 'free:' + k ? null : 'free:' + k), toolMode === 'free:' + k ? 'on' : ''));
+    bRow.append(btn('+500 supply', () => { supply[spawnTeam] += 500; refreshCmd(); }));
     const reset = document.createElement('div'); reset.className = 'row';
     reset.append(btn('Restart battle', () => { scenario(); refreshCmd(); }), btn('Clear all units', () => { clearUnits(); refreshCmd(); }, 'warn'), btn('Repair all terrain', () => resetTerrain()));
-    body.append(h3('Team'), teamRow, h3('Squad type'), grid, act, p('Number = men per squad. Change it under Tune.'), h3('Battlefield'), reset);
+    body.append(h3('Team'), teamRow, h3('Squad type'), grid, act, p('Number = men per squad. Spawned squads are free. Squads trained at buildings cost supply.'),
+      h3('Finished buildings, free'), bRow, h3('Battlefield'), reset);
   } else if (drawer === 'tune') {
     $('#drawerTitle').textContent = 'Tune numbers';
     const sel = document.createElement('select'); sel.id = 'tuneSel';
-    for (const t of TYPE_ORDER) { const o = document.createElement('option'); o.value = t; o.textContent = TYPES[t].name; sel.append(o); }
-    const ow = document.createElement('option'); ow.value = 'world'; ow.textContent = 'Terrain and engineers'; sel.append(ow);
+    const opt = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.append(o); };
+    for (const t of TYPE_ORDER) opt(t, TYPES[t].name);
+    for (const k in BUILD) opt('build:' + k, `${BUILD_NAMES[k].blue} / ${BUILD_NAMES[k].grey}`);
+    opt('faction:blue', 'Empire faction traits'); opt('faction:grey', 'Faithful faction traits');
+    opt('world', 'Terrain, engineers and supply');
     sel.value = tuneType;
     sel.addEventListener('change', () => { tuneType = sel.value; renderDrawer(); });
-    body.append(p('Changes apply live and are saved in this browser.'), sel);
+    body.append(p('Changes apply live and are saved in this browser. Sliders you changed are marked.'), sel);
     if (tuneType === 'world') for (const f of WORLD_FIELDS) body.append(sliderRow(WORLD, f));
-    else {
+    else if (tuneType.startsWith('build:')) {
+      const k = tuneType.split(':')[1];
+      for (const f of BUILD_FIELDS) body.append(sliderRow(BUILD[k], f));
+      if (k === 'turret') for (const f of TURRET_FIELDS) body.append(sliderRow(BUILD[k], f));
+      if (BUILD[k].makes) body.append(p('Trains: ' + BUILD[k].makes.map(t => TYPES[t].name).join(', ') + '.'));
+    } else if (tuneType.startsWith('faction:')) {
+      const f = tuneType.split(':')[1];
+      for (const fl of FACTION_FIELDS) body.append(sliderRow(FACTION[f], fl));
+      body.append(p(f === 'blue' ? 'The Empire grows soldiers in vats: cheaper and quicker to train, but they lose heart sooner.' : 'The Faithful are few: dearer and slower to raise, but tougher, sharper and hard to break.'));
+    } else {
       const T = TYPES[tuneType];
       const fields = UNIT_FIELDS.slice();
       if (T.splash != null) fields.push(EXTRA_FIELDS.splash);
@@ -1424,8 +1792,16 @@ function renderDrawer() {
       if (tuneType === 'commander') body.append(p('Friendly squads inside the aura reload 15% faster, aim 10% better and recover morale faster.'));
     }
     const r = document.createElement('div'); r.className = 'row';
-    r.append(btn('Reset these to defaults', () => { if (tuneType === 'world') Object.assign(WORLD, DEFAULT_WORLD); else Object.assign(TYPES[tuneType], DEFAULT_TYPES[tuneType]); saveTune(); renderDrawer(); }, 'warn'));
-    body.append(r);
+    r.append(btn('Reset these to defaults', () => {
+      if (tuneType === 'world') Object.assign(WORLD, DEFAULT_WORLD);
+      else if (tuneType.startsWith('build:')) { const k = tuneType.split(':')[1]; Object.assign(BUILD[k], DEFAULT_BUILD[k]); }
+      else if (tuneType.startsWith('faction:')) { const f = tuneType.split(':')[1]; Object.assign(FACTION[f], DEFAULT_FACTION[f]); }
+      else Object.assign(TYPES[tuneType], DEFAULT_TYPES[tuneType]);
+      saveTune(); renderDrawer();
+    }, 'warn'), btn('Copy my tuning', () => copyTuning()));
+    body.append(r, p('Copy my tuning copies every number you changed, so you can paste it into the chat with Claude.'));
+    const box = document.createElement('textarea'); box.className = 'copybox'; box.id = 'copyBox'; box.readOnly = true; box.hidden = true;
+    body.append(box);
   } else if (drawer === 'report') {
     $('#drawerTitle').textContent = 'Battle report';
     body.append(p('Live totals since the last restart. Hit rate counts shots, saber swings and shells that hurt someone.'));
@@ -1440,6 +1816,7 @@ function renderDrawer() {
     const dl = document.createElement('dl'); dl.className = 'keys';
     const rows = [
       ['Tap soldier', 'Select their squad'], ['Tap ground', 'Move selected squads'], ['Tap enemy', 'Attack that squad'], ['Tap your skiff', 'Selected infantry climb aboard'],
+      ['Tap building', 'Select it to train units'], ['Tap ground', 'With a building selected: set its rally point'],
       ['Drag', 'Pan the camera'], ['Pinch', 'Zoom and rotate'],
       ['Left drag', 'Box select (mouse)'], ['Right click', 'Move or attack (mouse)'], ['Right drag', 'Pan (mouse)'], ['Middle drag', 'Rotate and tilt'],
       ['WASD / arrows', 'Pan'], ['Q / E', 'Rotate'], ['Wheel', 'Zoom'], ['A', 'Attack-move'], ['C', 'Drop a shell at the cursor'], ['Space', 'Pause'], ['Esc', 'Cancel or deselect'],
@@ -1450,8 +1827,34 @@ function renderDrawer() {
       p('Soldiers cannot climb slopes steeper than the walkable limit. The west plateau has a ramp. The east plateau is all cliffs: select Sappers, tap Build ramp, then tap the bottom and the top.'),
       p('High ground adds range and accuracy. Craters give cover. Kill a gun crew and the gun is left behind for anyone to capture.'),
       p('The Hover Skiff carries up to 10 men, glides over craters and climbs steeper slopes than soldiers can, but not cliffs.'),
+      p('Both sides earn supply over time. Spend it at buildings: Cloning Vats or Sanctum train Sappers, Command Staff and Hover Skiffs; Barracks or Chapter House train everything else. Sappers construct new barracks and turrets.'),
+      p('The Empire is cheap and fast but breaks easier. The Faithful cost more but are tougher, sharper and hold their nerve. Tune both under Tune.'),
       p('Sound is generated live. On iPhone, turn the ringer switch on or the game stays silent.'));
   }
+}
+function tuningDiff() {
+  const out = {};
+  const add = (sect, name, obj, def) => {
+    for (const k in def) if (typeof def[k] === 'number' && Math.abs(obj[k] - def[k]) > 1e-9) {
+      if (!out[sect]) out[sect] = {};
+      if (!out[sect][name]) out[sect][name] = {};
+      out[sect][name][k] = { was: def[k], now: obj[k] };
+    }
+  };
+  for (const t in TYPES) add('units', t, TYPES[t], DEFAULT_TYPES[t]);
+  for (const k in BUILD) add('buildings', k, BUILD[k], DEFAULT_BUILD[k]);
+  for (const f in FACTION) add('factions', f === 'blue' ? 'empire' : 'faithful', FACTION[f], DEFAULT_FACTION[f]);
+  add('world', 'all', WORLD, DEFAULT_WORLD);
+  return out;
+}
+function copyTuning() {
+  const diff = tuningDiff();
+  const text = Object.keys(diff).length ? 'Plateau Sandbox tuning: ' + JSON.stringify(diff) : 'Plateau Sandbox tuning: no changes from the defaults.';
+  const box = $('#copyBox');
+  const show = () => { if (box) { box.hidden = false; box.value = text; box.focus(); box.select(); } };
+  try {
+    navigator.clipboard.writeText(text).then(() => { toast('Copied. Paste it into the chat.', 2600); show(); }, () => { show(); toast('Select the text below and copy it.', 2600); });
+  } catch (e) { show(); toast('Select the text below and copy it.', 2600); }
 }
 function renderReport() {
   const tbl = $('#repTable');
@@ -1461,7 +1864,7 @@ function renderReport() {
   for (const s of rows) {
     const alive = squads.filter(q => !q.dead && q.team === s.team && q.type === s.type).reduce((a, q) => a + q.alive.length, 0);
     const hit = s.shots ? Math.round(s.hits / s.shots * 100) + '%' : '–';
-    html += `<tr><td><span class="dot" style="background:${TEAM[s.team].css}"></span>${TYPES[s.type].name}</td><td class="n">${alive}</td><td class="n">${s.lost}</td><td class="n">${s.kills}</td><td class="n">${hit}</td></tr>`;
+    html += `<tr><td><span class="dot" style="background:${TEAM[s.team].css}"></span>${nameOf(s.type, s.team)}</td><td class="n">${alive}</td><td class="n">${s.lost}</td><td class="n">${s.kills}</td><td class="n">${hit}</td></tr>`;
   }
   tbl.innerHTML = html + '</tbody>';
 }
@@ -1583,7 +1986,7 @@ function syncMeshes(dt) {
     for (const m of sq.members) {
       const g = m.mesh;
       if (m.alive) {
-        const bob = sq.order && (sq.order.k === 'repair' || sq.order.k === 'ramp') && !m.moving && sq.order.started !== false ? Math.abs(Math.sin(simTime * 7 + m.k)) * 0.12 : 0;
+        const bob = sq.order && (sq.order.k === 'repair' || sq.order.k === 'ramp' || sq.order.k === 'build') && !m.moving && sq.order.started !== false ? Math.abs(Math.sin(simTime * 7 + m.k)) * 0.12 : 0;
         g.position.set(m.x, m.y + bob, m.z);
         g.rotation.set(0, m.heading, 0);
         g.userData.ring.visible = sel;
@@ -1597,6 +2000,12 @@ function syncMeshes(dt) {
     }
   }
   for (const g of guns) { g.mesh.position.set(g.x, hAt(g.x, g.z), g.z); g.mesh.rotation.y = g.heading; }
+  for (const b of buildings) {
+    if (b.dead) continue;
+    b.mesh.position.set(b.x, b.y, b.z); b.mesh.rotation.y = b.heading;
+    b.mesh.scale.y = 0.12 + 0.88 * b.progress;
+    if (b.mesh.userData.head && b.aim != null) b.mesh.userData.head.rotation.y = b.aim - b.heading;
+  }
 }
 function step(dt) {
   simTime += dt;
@@ -1604,6 +2013,8 @@ function step(dt) {
   for (const sq of squads) if (!sq.dead) updateSquad(sq, dt);
   updateProjectiles(dt);
   updateCaptures();
+  for (const t in supply) supply[t] += WORLD.income * dt;
+  updateBuildings(dt);
   aiT -= dt;
   if (aiT <= 0) { aiT = 1.2; runAI(); }
 }
@@ -1630,7 +2041,12 @@ function frame(now) {
     perf.frames = 0; perf.t = 0; perf.sim = 0; perf.draw = 0;
   }
   uiT -= real;
-  if (uiT <= 0) { uiT = 0.4; if (selected.size) refreshCmd(); if (drawer === 'report') renderReport(); }
+  if (uiT <= 0) {
+    uiT = 0.4;
+    if (selected.size || selB) refreshCmd();
+    if (drawer === 'report') renderReport();
+    $('#supply').textContent = `Supply · Empire ${Math.floor(supply.blue)} · Faithful ${Math.floor(supply.grey)}`;
+  }
   requestAnimationFrame(frame);
 }
 function resize() {
@@ -1641,10 +2057,10 @@ function resize() {
 window.addEventListener('resize', resize);
 
 scenario();
-window.__plateau = { squads, embark, disembark, setOrder, explode };
+window.__plateau = { squads, buildings, supply, embark, disembark, setOrder, explode, queueUnit, Building };
 resize();
 refreshCmd();
-toast('Grey Coats are marching on you. Tap a soldier to take command. Tap anywhere to turn on sound.', 4500);
+toast('The Faithful are marching on the Empire. Tap a soldier or a building to take command. Tap anywhere to turn on sound.', 5000);
 requestAnimationFrame(frame);
 })();
 </script>

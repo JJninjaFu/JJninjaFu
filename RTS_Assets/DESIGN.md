@@ -39,6 +39,15 @@ Living summary of decisions so far, so any Claude session can pick up where the 
 - Game name candidates: Spittin' Brass (tagline "...and kickin' ass"), Mountains & Molehills, Dig In.
 - Faction names below are placeholders ("Ashfall" is dropped).
 
+## Sandbox prototype (RTS_Prototype/plateau_sandbox.html)
+
+Live at the artifact link in chat. As of now it has: 320 m map, 8 squad types plus the Hover Skiff,
+supply economy, buildings (HQ: Cloning Vats / Sanctum; Barracks / Chapter House; Auto-Turret / Bastion),
+training queues and rally points, Sapper construction, faction traits (Empire cheap/fast/brittle,
+Faithful costly/tough/steady), synthesized sound, performance meter, live tuning with "Copy my tuning".
+JJ's tuning lives in their browser only; they paste "Copy my tuning" output into chat to share it.
+If 320 m runs poorly on phones, drop to 240 m (1.5x).
+
 ## Factions (working names)
 
 | Faction | Look | Personality |
