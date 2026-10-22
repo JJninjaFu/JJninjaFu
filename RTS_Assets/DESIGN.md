@@ -25,6 +25,20 @@ Living summary of decisions so far, so any Claude session can pick up where the 
 - A Native-inspired faction is parked. If it ever happens, it must be a real faction with its own
   strengths (scouting, ambush, mobility), never just targets.
 
+## Setting direction (evolving, latest wins)
+
+- Fully invented world, Dawn of War-style freedom. Brass-era look is a starting point, not a commitment.
+- Story frame: a civil war that keeps escalating for a century into a world war, eventually reaching orbit
+  (space elevator, orbital bases that fund the ground armies).
+- Inspirations: Dawn of War, the Foundation TV series (a long-ruling Empire vs. a society that comes to
+  worship its founder). Borrow themes, not names, characters or specific designs.
+- Faction idea: the Empire (professional soldiers, an Emperor hero whose presence buffs nearby troops ~15%)
+  vs. the Faithful (cheaper militia who arm themselves and grow into zealots, Manor Lords-style).
+- Vehicle idea: open-sided hover transport, armored glass front, carries ~2 squads, passengers can fire out
+  the sides; hovers over craters that block wheels and feet.
+- Game name candidates: Spittin' Brass (tagline "...and kickin' ass"), Mountains & Molehills, Dig In.
+- Faction names below are placeholders ("Ashfall" is dropped).
+
 ## Factions (working names)
 
 | Faction | Look | Personality |
