@@ -1873,7 +1873,7 @@ function renderReport() {
 const SFX = { ctx: null, on: true, master: null, wet: null, noise: null, voices: 0, voiceT: 0, hum: null };
 function audioInit() {
   if (!SFX.on) return;
-  if (SFX.ctx) { if (SFX.ctx.state === 'suspended') SFX.ctx.resume(); return; }
+  if (SFX.ctx) { unlockAudio(); return; }
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return;
   try {
@@ -1893,11 +1893,41 @@ function audioInit() {
     lp.type = 'lowpass'; lp.frequency.value = 360; hg.gain.value = 0;
     o1.connect(lp); o2.connect(lp); lp.connect(hg); hg.connect(SFX.master); o1.start(); o2.start();
     SFX.hum = { g: hg, o1, o2 };
-    if (ctx.state === 'suspended') ctx.resume();
+    ctx.onstatechange = updateSoundLabel;
+    unlockAudio();
   } catch (e) { SFX.ctx = null; }
 }
-document.addEventListener('pointerdown', audioInit);
-document.addEventListener('keydown', audioInit);
+// iPhone Safari: the silent switch mutes Web Audio unless the page also plays an HTML audio
+// element (or declares a playback audio session), and audio only unlocks inside certain taps.
+let silentEl = null;
+function silentWavURL() {
+  const n = 4000, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, n, true);
+  for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+  let bin = '';
+  const u8 = new Uint8Array(buf);
+  for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+  return 'data:audio/wav;base64,' + btoa(bin);
+}
+function unlockAudio() {
+  const ctx = SFX.ctx;
+  if (!ctx) return;
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* not supported */ }
+  if (!silentEl) { try { silentEl = new Audio(silentWavURL()); silentEl.loop = true; silentEl.setAttribute('playsinline', ''); } catch (e) { silentEl = null; } }
+  if (silentEl && silentEl.paused) { const pr = silentEl.play(); if (pr && pr.catch) pr.catch(() => {}); }
+  if (ctx.state !== 'running') { const r = ctx.resume(); if (r && r.then) r.then(updateSoundLabel, () => {}); }
+  try { const b = ctx.createBuffer(1, 1, 22050), src = ctx.createBufferSource(); src.buffer = b; src.connect(ctx.destination); src.start(0); } catch (e) { /* ignore */ }
+  updateSoundLabel();
+}
+function updateSoundLabel() {
+  const b = $('#sndBtn');
+  if (!b) return;
+  b.textContent = !SFX.on ? 'Sound off' : (SFX.ctx && SFX.ctx.state === 'running' ? 'Sound on' : 'Tap for sound');
+  b.setAttribute('aria-pressed', String(SFX.on));
+}
+for (const ev of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) document.addEventListener(ev, audioInit, true);
 // Volume falls off with distance from the camera's focus point, pans with screen position,
 // and arrives late by the speed of sound (343 m/s), so a far cannon booms after its flash.
 function sndOut(x, z, reach) {
@@ -1973,11 +2003,13 @@ function updateHum() {
   SFX.hum.o2.frequency.setTargetAtTime(moving ? 111 : 90, t, 0.3);
 }
 $('#sndBtn').addEventListener('click', () => {
-  SFX.on = !SFX.on;
-  $('#sndBtn').textContent = SFX.on ? 'Sound on' : 'Sound off';
-  $('#sndBtn').setAttribute('aria-pressed', String(SFX.on));
-  if (SFX.on) audioInit();
+  const wasRunning = SFX.ctx && SFX.ctx.state === 'running';
+  if (wasRunning || !SFX.on) SFX.on = !SFX.on;
+  if (SFX.on) { audioInit(); setTimeout(() => { if (SFX.ctx) tone(SFX.master, SFX.ctx.currentTime + 0.01, 'sine', 880, 660, 0.12, 0.5); }, 60); }
+  if (!SFX.on && silentEl) silentEl.pause();
+  updateSoundLabel();
 });
+updateSoundLabel();
 
 // =============================================================== loop
 function syncMeshes(dt) {
