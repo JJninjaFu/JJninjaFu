@@ -46,3 +46,20 @@ Hydroneer, Captain of Industry. Focus on 1 to 2 claims, not a sprawling map.
   arrive there and drive down), Saloon (placeholder for the cowboy militia).
 - In a race each player has their own copy of this map. One shared map with 4 claims around the town
   needs terrain sync, which is the next big multiplayer step.
+
+## v4: the big map (step 1 of the 8-player plan)
+
+- 400 m map (4x the area). Town on a mesa in the exact center, 8 graded roads up it, one per claim.
+- 8 claim slots in a ring at 120 m, rotationally identical (same geology, pond, gold channel and pockets in
+  local coordinates), separated by ridges with a pass at 150 m. You hold slot 0; red stakes mark open slots.
+- Rich gold pockets at the foot of the mesa between claims: the contested middle.
+- Minimap in the ledger panel; tap it to look somewhere (switches to boss view).
+
+## Plan (agreed with JJ)
+
+1. Big map (done, v4).
+2. Shared world: 2 to 4 players in one world, one browser hosts the simulation and streams state.
+3. Shootouts: revolvers, saloon hires a posse of 2 to 4 cowboys, carried gold drops on death, town control
+   pays the best gold price.
+4. Scale to 8 (4v4) with bots for empty slots.
+Long term the real game lives in JJ's Unreal project; this browser build is the design lab.

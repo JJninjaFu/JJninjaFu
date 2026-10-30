@@ -78,6 +78,8 @@ table.rep { width: 100%; border-collapse: collapse; font-variant-numeric: tabula
 table.rep td { padding: 5px 4px; border-bottom: 1px solid #2c261d; }
 table.rep td.n { text-align: right; color: var(--gold); font-weight: 600; }
 .board { display: flex; flex-direction: column; gap: 1px; font-size: 14px; font-variant-numeric: tabular-nums; border-top: 1px solid var(--line); padding-top: 4px; margin-top: 2px; }
+#mini { width: 132px; height: 132px; border-radius: 6px; border: 1px solid var(--line); margin-top: 4px; cursor: pointer; }
+@media (max-width: 640px) { #mini { width: 96px; height: 96px; } }
 .board .me { color: var(--gold); font-weight: 700; }
 .field { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
 .field input, .field select { background: #12100c; border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; color: var(--ink); min-height: 36px; font-family: var(--ui); font-size: 16px; }
@@ -111,6 +113,7 @@ body.drivetouch .cmdbar { display: none; }
       <div class="stats" id="stats"></div>
       <div class="perf" id="perf">measuring…</div>
       <div class="board" id="board" hidden></div>
+      <canvas id="mini" width="132" height="132" aria-label="Map of the claims"></canvas>
     </div>
     <div class="controls">
       <div class="seg" id="speedSeg" role="group" aria-label="Game speed">
@@ -184,7 +187,7 @@ function saveTune() { try { localStorage.setItem(STORE_KEY, JSON.stringify(T)); 
 const PRICES = { excavator: 14000, loader: 6000, pump: 2500, generator: 8000, plant: 18000, bunkhouse: 5000, survey: 1500, hire: 600 };
 
 // =============================================================== ground: surface, overburden, pay gravel, bedrock
-const SIZE = 200, N = 161, CELL = SIZE / (N - 1), HALF = SIZE / 2, NN = N * N, WATER_Y = -1.4;
+const SIZE = 400, N = 321, CELL = SIZE / (N - 1), HALF = SIZE / 2, NN = N * N, WATER_Y = -1.4;
 const H = new Float32Array(NN), H0 = new Float32Array(NN), PAYTOP = new Float32Array(NN), BEDR = new Float32Array(NN), GRADE = new Float32Array(NN);
 const loose = new Float32Array(NN), looseKind = new Uint8Array(NN);
 const I = (i, j) => j * N + i;
@@ -198,52 +201,51 @@ function hAt(x, z) {
 let seed = 20261030;
 function srand() { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }
 const hash = (i, j) => { const s = Math.sin(i * 12.9898 + j * 78.233) * 43758.5453; return s - Math.floor(s); };
-const creekZ = x => 70 + 8 * Math.sin(x * 0.03);
-const channelZ = x => -10 + 22 * Math.sin(x * 0.022 + 0.6);
-const POCKETS = [];
-for (let n = 0; n < 7; n++) POCKETS.push([srand() * 160 - 80, srand() * 120 - 85, 2.5 + srand() * 3, 5 + srand() * 8]);
-const TOWN = { x: -62, z: -58, r: 20, h: 7 };
-const ROAD = [[-16, 16], [-26, -4], [-38, -24], [-50, -40], [TOWN.x, TOWN.z]];
+// 8 claims in a ring around the mesa town, rotationally identical so every slot is fair.
+const SLOTS = 8, SEG = Math.PI * 2 / SLOTS, CLAIM_R = 120;
+function localOf(x, z) {
+  // nearest claim slot, and (u, v): u points away from town, v runs sideways across the claim
+  const k = ((Math.round(Math.atan2(x, z) / SEG) % SLOTS) + SLOTS) % SLOTS, a = k * SEG, ox = Math.sin(a), oz = Math.cos(a);
+  const px = x - ox * CLAIM_R, pz = z - oz * CLAIM_R;
+  return { k, u: px * ox + pz * oz, v: px * oz - pz * ox };
+}
+function worldOf(k, u, v) { const a = k * SEG, ox = Math.sin(a), oz = Math.cos(a); return [ox * (CLAIM_R + u) + oz * v, oz * (CLAIM_R + u) - ox * v]; }
+const LOCAL_POCKETS = [[-8, -14, 3, 9], [14, 10, 2.5, 10], [2, 26, 3, 7]];
+const POND = [30, 16];
+const TOWN = { x: 0, z: 0, r: 22, h: 8 };
+const ROAD_IN = 20, ROAD_OUT = CLAIM_R - 34;
 const ROADK = new Uint8Array(NN);
 function natural(x, z) {
-  let h = 1.2 * Math.sin(x * 0.025) * Math.cos(z * 0.02) + 0.6 * Math.sin(x * 0.06 + 1) * Math.sin(z * 0.05) - z * 0.012 + 0.6;
-  h += TOWN.h * smooth(TOWN.r + 16, TOWN.r + 2, dist(x, z, TOWN.x, TOWN.z));     // the mesa the town sits on
-  h += 9 * smooth(58, 86, x) * (0.75 + 0.25 * Math.sin(z * 0.05));                // east ridge
-  h += 5 * smooth(-62, -88, z) * smooth(-20, 10, x);                              // south bluff
-  h += 2.4 * smooth(-70, -92, x);                                                 // west bench
-  h += 3.2 * Math.exp(-((x - 32) ** 2 + (z + 34) ** 2) / (2 * 9 * 9));            // knoll
+  const r = Math.hypot(x, z), f = ((Math.atan2(x, z) % SEG) + SEG) % SEG, off = Math.min(f, SEG - f), arc = off * r;
+  let h = 0.9 + 0.6 * Math.sin(r * 0.05) * Math.cos(arc * 0.06) + 0.4 * Math.sin(r * 0.11 + arc * 0.08);
+  h += TOWN.h * smooth(TOWN.r + 16, TOWN.r + 2, r);                                                    // the mesa
+  h += 7 * smooth(SEG * 0.3, SEG * 0.5, off) * smooth(48, 72, r) * (1 - 0.85 * Math.exp(-((r - 150) ** 2) / 200)); // ridges between claims, with a pass
+  h += 6 * smooth(178, 198, r);                                                                       // outer rim
   return h;
 }
-function roadNear(x, z) {
-  let best = 1e9, s = 0, acc = 0;
-  for (let n = 0; n < ROAD.length - 1; n++) {
-    const [ax, az] = ROAD[n], [bx, bz] = ROAD[n + 1], L = dist(ax, az, bx, bz);
-    const t = clamp(((x - ax) * (bx - ax) + (z - az) * (bz - az)) / (L * L), 0, 1), d = dist(x, z, ax + (bx - ax) * t, az + (bz - az) * t);
-    if (d < best) { best = d; s = acc + t * L; }
-    acc += L;
-  }
-  return { d: best, s, total: acc };
-}
 function genGround() {
-  const h0 = natural(ROAD[0][0], ROAD[0][1]), h1 = natural(TOWN.x, TOWN.z);
+  const h0 = natural(0, ROAD_OUT), h1 = natural(0, 0);
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const x = wx(i), z = wx(j), k = I(i, j);
+    const x = wx(i), z = wx(j), k = I(i, j), r = Math.hypot(x, z), L = localOf(x, z);
     let h = natural(x, z);
-    const rn = roadNear(x, z);
-    if (rn.d < 8) h = lerp(h, lerp(h0, h1, rn.s / rn.total), 1 - smooth(3, 8, rn.d));
-    const td = dist(x, z, TOWN.x, TOWN.z);
-    if (td < TOWN.r + 2) h = lerp(h, h1, 1 - smooth(TOWN.r - 4, TOWN.r + 2, td));
-    ROADK[k] = rn.d < 2.6 || td < 11 ? 1 : 0;
-    const cd = Math.abs(z - creekZ(x));
-    h = lerp(h, -2.6, smooth(8, 3.5, cd));
+    // a graded road from every claim straight up the mesa
+    const rd = r > ROAD_IN - 4 && r < ROAD_OUT + 4 ? Math.abs(L.v) : 1e9;
+    if (rd < 8) h = lerp(h, lerp(h1, h0, clamp((r - ROAD_IN) / (ROAD_OUT - ROAD_IN), 0, 1)), 1 - smooth(3, 8, rd));
+    if (r < TOWN.r + 2) h = lerp(h, h1, 1 - smooth(TOWN.r - 4, TOWN.r + 2, r));
+    ROADK[k] = rd < 2.6 || r < 16 ? 1 : 0;
+    const pd = dist(L.u, L.v, POND[0], POND[1]);
+    h = lerp(h, -2.8, smooth(9, 4, pd));
     H[k] = H0[k] = h;
-    const over = 1.4 + 0.9 * (0.5 + 0.5 * Math.sin(x * 0.07 + z * 0.05)) + Math.max(0, h) * 0.22;
-    const pay = 1.6 + 0.8 * (0.5 + 0.5 * Math.cos(x * 0.05 - z * 0.06));
-    PAYTOP[k] = h - (cd < 6 ? 0.4 : over);
+    const over = 1.4 + 0.9 * (0.5 + 0.5 * Math.sin(L.u * 0.07 + L.v * 0.05)) + Math.max(0, h) * 0.22;
+    const pay = 1.6 + 0.8 * (0.5 + 0.5 * Math.cos(L.u * 0.05 - L.v * 0.06));
+    PAYTOP[k] = h - (pd < 7 ? 0.4 : over);
     BEDR[k] = PAYTOP[k] - pay;
-    const dp = Math.abs(z - channelZ(x));
-    let g = (0.15 + 4.0 * Math.exp(-(dp * dp) / (2 * 9 * 9))) * (0.65 + 0.7 * hash(i, j));
-    for (const [px, pz, pr, pg] of POCKETS) g += pg * Math.exp(-((x - px) ** 2 + (z - pz) ** 2) / (2 * pr * pr));
+    const dp = Math.abs(L.u - (6 * Math.sin(L.v * 0.07) - 4));
+    let g = (0.15 + 4.0 * Math.exp(-(dp * dp) / (2 * 9 * 9))) * (0.65 + 0.7 * hash(Math.round(L.u / CELL), Math.round(L.v / CELL)));
+    for (const [pu, pv, pr, pg] of LOCAL_POCKETS) g += pg * Math.exp(-((L.u - pu) ** 2 + (L.v - pv) ** 2) / (2 * pr * pr));
+    // rich ground around the foot of the mesa: worth fighting over
+    const mid = ((Math.atan2(x, z) + SEG / 2) % SEG + SEG) % SEG, md = dist(r, Math.min(mid, SEG - mid) * r, 54, SEG / 2 * 54);
+    g += 14 * Math.exp(-(md * md) / (2 * 4 * 4));
     GRADE[k] = g;
   }
 }
@@ -304,7 +306,7 @@ function colorVertex(i, j) {
   tCol[k * 3] = c[0] + v; tCol[k * 3 + 1] = c[1] + v; tCol[k * 3 + 2] = c[2] + v;
 }
 for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { colorVertex(i, j); normalAt(i, j); }
-tGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 160);
+tGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), SIZE * 0.75);
 let dirty = null;
 function markDirty(i0, j0, i1, j1) {
   if (!dirty) dirty = [i0, j0, i1, j1];
@@ -440,7 +442,7 @@ function findPath(sx, sz, tx, tz, slope) {
   const pop = () => { const top = heapA[0]; hs--; if (hs > 0) { heapA[0] = heapA[hs]; heapF[0] = heapF[hs]; let p = 0; for (;;) { const l = p * 2 + 1, r = l + 1; let m = p; if (l < hs && heapF[l] < heapF[m]) m = l; if (r < hs && heapF[r] < heapF[m]) m = r; if (m === p) break; [heapA[p], heapA[m]] = [heapA[m], heapA[p]]; [heapF[p], heapF[m]] = [heapF[m], heapF[p]]; p = m; } } return top; };
   stamp[start] = curStamp; gScore[start] = 0; came[start] = -1; push(start, hfn(start));
   let best = start, bestH = hfn(start), iter = 0;
-  while (hs > 0 && iter++ < 60000) {
+  while (hs > 0 && iter++ < 160000) {
     const k = pop();
     if (closed[k] === curStamp) continue;
     closed[k] = curStamp;
@@ -639,15 +641,19 @@ class Structure {
   get inPt() { return [this.x + Math.sin(this.heading) * (this.S.r + 2.5), this.z + Math.cos(this.heading) * (this.S.r + 2.5)]; }
 }
 function beds() { return structures.filter(s => s.kind === 'bunkhouse').length * 4; }
+const HOME = 0; // your claim slot (multiplayer will hand out 0 to 7)
 function setupClaim() {
-  new Structure('plant', 0, 30, Math.PI);
-  new Structure('generator', 13, 33, Math.PI);
-  new Structure('pump', -4, 59.5, 0);
-  new Structure('bunkhouse', -26, 24, Math.PI);
-  new Machine('excavator', 10, 8, Math.PI);
-  new Machine('loader', -6, 14, Math.PI);
-  new Machine('suv', -17, 20, Math.PI * 0.8);
-  Object.assign(jim, { x: -19, z: 14, yaw: Math.PI, driving: null });
+  const k = HOME, a = k * SEG, at = (u, v) => worldOf(k, u, v);
+  new Structure('plant', ...at(-20, 8), a);
+  new Structure('generator', ...at(-24, 22), a);
+  new Structure('pump', ...at(22, 16), a);
+  new Structure('bunkhouse', ...at(-26, -20), a + Math.PI);
+  new Machine('excavator', ...at(-4, -14), a);
+  new Machine('loader', ...at(-12, -2), a);
+  new Machine('suv', ...at(-32, -6), a + Math.PI);
+  const [jx, jz] = at(-30, -11);
+  Object.assign(jim, { x: jx, z: jz, yaw: a, driving: null });
+  cam.x = jx; cam.z = jz; cam.yaw = a + Math.PI * 1.25;
 }
 
 // =============================================================== simulation
@@ -817,9 +823,9 @@ function step(dt) {
 }
 
 // =============================================================== camera + input (isometric)
-const cam = { x: -2, z: 22, yaw: Math.PI * 1.25, pitch: 0.66, size: window.innerWidth < 640 ? 46 : 38 };
+const cam = { x: 0, z: 90, yaw: Math.PI * 1.25, pitch: 0.66, size: window.innerWidth < 640 ? 46 : 38 };
 function placeCamera() {
-  cam.x = clamp(cam.x, -HALF, HALF); cam.z = clamp(cam.z, -HALF, HALF); cam.size = clamp(cam.size, 10, 110);
+  cam.x = clamp(cam.x, -HALF, HALF); cam.z = clamp(cam.z, -HALF, HALF); cam.size = clamp(cam.size, 10, 190);
   const ty = Math.max(0, hAt(cam.x, cam.z)), d = 400;
   camera.position.set(cam.x + Math.sin(cam.yaw) * Math.cos(cam.pitch) * d, ty + Math.sin(cam.pitch) * d, cam.z + Math.cos(cam.yaw) * Math.cos(cam.pitch) * d);
   camera.lookAt(cam.x, ty, cam.z);
@@ -1159,7 +1165,8 @@ function deliver(type) {
   if (ledger.money < PRICES[type]) return toast(`Not enough money: costs ${money(PRICES[type])}.`, 2400);
   spend(PRICES[type]);
   const m = new Machine(type, TOWN.x + 12 + rand(-2, 2), TOWN.z + 10 + rand(-2, 2), Math.PI * 0.75);
-  m.order = { k: 'move', x: rand(-8, 8), z: rand(-4, 6) };
+  const [dx, dz] = worldOf(HOME, -14 + rand(-4, 4), rand(-6, 6));
+  m.order = { k: 'move', x: dx, z: dz };
   toast(`${m.name} delivered at the dealer in town. It is driving down to the claim.`, 3000); select(m);
 }
 function renderDrawer() {
@@ -1172,7 +1179,7 @@ function renderDrawer() {
   const p = t => { const e = document.createElement('p'); e.textContent = t; return e; };
   if (drawer === 'shop') {
     $('#drawerTitle').textContent = 'Equipment dealer';
-    body.append(p(`You have ${money(ledger.money)}. Machines arrive by the south road. Buildings: tap to place.`), h3('Machines'),
+    body.append(p(`You have ${money(ledger.money)}. Machines arrive at the dealer in town and drive down to your claim. Buildings: tap to place.`), h3('Machines'),
       shopItem('Excavator', PRICES.excavator, 'Digs a site layer by layer and sorts waste from pay dirt.', () => deliver('excavator')),
       shopItem('Loader', PRICES.loader, 'Hauls pay dirt from piles to the wash plant hopper.', () => deliver('loader')),
       h3('Buildings'),
@@ -1390,6 +1397,13 @@ const TOWNSPOTS = [];
   const well = add(scene, cyl(1, 1, 0.9, 12), M(0x8a8273), TOWN.x, y0 + 0.45, TOWN.z);
   TOWNSPOTS.push({ x: TOWN.x, z: TOWN.z, r: 1.2 });
 })();
+for (let k = 0; k < SLOTS; k++) {
+  if (k === HOME) continue;
+  const [x, z] = worldOf(k, -20, 8), g = new THREE.Group();
+  add(g, box(0.25, 4, 0.25), MAT.wood, 0, 2, 0);
+  add(g, box(1.6, 1, 0.08), M(0xd4574a), 0.8, 3.4, 0);
+  g.position.set(x, hAt(x, z), z); scene.add(g);
+}
 function blockTown() {
   for (const t of TOWNSPOTS) { const [i0, j0, i1, j1] = cellBox(t.x, t.z, t.r + 0.5); for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (dist(wx(i), wx(j), t.x, t.z) <= t.r + 0.5) blocked[I(i, j)] = 1; }
 }
@@ -1644,6 +1658,32 @@ function standings() {
   }
   return tbl;
 }
+// --- minimap: terrain is baked once, dots are redrawn with the UI tick
+const MINI = 132, miniBg = document.createElement('canvas');
+miniBg.width = miniBg.height = MINI;
+function bakeMini() {
+  const x = miniBg.getContext('2d'), img = x.createImageData(MINI, MINI);
+  for (let py = 0; py < MINI; py++) for (let px = 0; px < MINI; px++) {
+    const wxp = (px + 0.5) / MINI * SIZE - HALF, wzp = (py + 0.5) / MINI * SIZE - HALF, h = hAt(wxp, wzp), o = (py * MINI + px) * 4;
+    const [i, j] = cellOf(wxp, wzp), road = ROADK[I(i, j)];
+    let c = h < WATER_Y ? [70, 112, 138] : road ? [150, 125, 90] : [Math.min(255, 95 + h * 9), Math.min(255, 118 + h * 7), 62 + h * 3];
+    img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+}
+function drawMini() {
+  const cv = $('#mini'), c = cv.getContext('2d'), sc = MINI / SIZE, P = (x, z) => [(x + HALF) * sc, (z + HALF) * sc];
+  c.drawImage(miniBg, 0, 0);
+  for (let k = 0; k < SLOTS; k++) { const [x, z] = P(...worldOf(k, -20, 8)); c.fillStyle = k === HOME ? '#e3b448' : '#d4574a'; c.fillRect(x - 3, z - 3, 6, 6); }
+  const [tx, tz] = P(TOWN.x, TOWN.z); c.strokeStyle = '#efe5cf'; c.lineWidth = 1.5; c.beginPath(); c.arc(tx, tz, TOWN.r * sc, 0, 7); c.stroke();
+  for (const m of machines) { const [x, z] = P(m.x, m.z); c.fillStyle = m.type === 'suv' ? '#c4a86e' : '#f2c230'; c.fillRect(x - 1.5, z - 1.5, 3, 3); }
+  const [jx, jz] = P(jim.x, jim.z); c.fillStyle = '#ffffff'; c.beginPath(); c.arc(jx, jz, 3, 0, 7); c.fill();
+}
+$('#mini').addEventListener('click', e => {
+  const r = e.currentTarget.getBoundingClientRect();
+  cam.x = (e.clientX - r.left) / r.width * SIZE - HALF; cam.z = (e.clientY - r.top) / r.height * SIZE - HALF;
+  if (view === 'drive') setView('boss');
+});
 function renderBoard() {
   const el = $('#board');
   if (!mp.room && !race.active) { el.hidden = true; return; }
@@ -1702,7 +1742,7 @@ function resetClaim() {
   $('#surveyBtn').classList.remove('on'); $('#surveyBtn').textContent = 'Survey';
   setupClaim();
   for (const s of structures) if (s.kind === 'pump') s.wetOK = waterNear(s.x, s.z, 9) > 0;
-  markDirtyAll();
+  markDirtyAll(); bakeMini();
 }
 function beginRace(startAt, minutes) {
   if (!race.active) race.savedT = Object.assign({}, T);
@@ -1790,15 +1830,16 @@ function frame(now) {
   perf.sim += t1 - t0; perf.draw += t2 - t1; perf.frames++; perf.t += real;
   if (perf.t >= 0.5) { $('#perf').textContent = `${Math.round(perf.frames / perf.t)} fps · logic ${(perf.sim / perf.frames).toFixed(1)} ms · draw ${(perf.draw / perf.frames).toFixed(1)} ms`; perf.frames = 0; perf.t = 0; perf.sim = 0; perf.draw = 0; }
   uiT -= real;
-  if (uiT <= 0) { uiT = 0.4; renderStats(); refreshCmd(); renderBoard(); pushPresence(); updateTouchUI(); }
+  if (uiT <= 0) { uiT = 0.4; renderStats(); refreshCmd(); renderBoard(); pushPresence(); updateTouchUI(); drawMini(); }
   requestAnimationFrame(frame);
 }
 function resize() { renderer.setSize(glCanvas.clientWidth, glCanvas.clientHeight, false); }
 window.addEventListener('resize', resize);
 
 setupClaim();
+bakeMini();
 for (const s of structures) if (s.kind === 'pump') s.wetOK = waterNear(s.x, s.z, 9) > 0;
-window.__claim = { machines, structures, piles, ledger, T, digAt, jim, TOWN };
+window.__claim = { machines, structures, piles, ledger, T, digAt, jim, TOWN, worldOf };
 resize();
 renderStats();
 refreshCmd();
