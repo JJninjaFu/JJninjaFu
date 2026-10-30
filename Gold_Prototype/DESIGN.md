@@ -32,3 +32,17 @@ Hydroneer, Captain of Industry. Focus on 1 to 2 claims, not a sprawling map.
 - Rival claims, 15 to 30 minute match timer.
 - Town square with a saloon; hire cowboys as militia from buildings; small shootouts instead of armies.
 - Real models (excavator, bobcat) through the Meshy to Blender pipeline.
+
+## v3: drive it yourself (Road Crew style)
+
+- You are Jimbo, on foot. Hop into the excavator, loaders or the Crew 4x4 (X / F, or the Hop in button).
+  Excavator: WASD tracks, Q/E swing, Space digs and dumps; buckets sort into pay or waste piles, or straight
+  into the plant hopper. Loader: Space scoops a pile and dumps. Machines you are not driving keep their jobs.
+- Drive view follows Jimbo; Tab (or the button) switches to the boss view for click orders.
+- Phone: left thumb stick plus Hop / Dig / swing buttons.
+- Terrain has height now: a mesa with the town on top, an east ridge, a south bluff, a knoll, and a graded
+  hill road from the claim up to town.
+- Town: Assay Office (the only place gold sells, so you drive the 4x4 up), Equipment Dealer (deliveries
+  arrive there and drive down), Saloon (placeholder for the cowboy militia).
+- In a race each player has their own copy of this map. One shared map with 4 claims around the town
+  needs terrain sync, which is the next big multiplayer step.

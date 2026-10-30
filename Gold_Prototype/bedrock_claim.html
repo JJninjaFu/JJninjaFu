@@ -81,6 +81,14 @@ table.rep td.n { text-align: right; color: var(--gold); font-weight: 600; }
 .board .me { color: var(--gold); font-weight: 700; }
 .field { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
 .field input, .field select { background: #12100c; border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; color: var(--ink); min-height: 36px; font-family: var(--ui); font-size: 16px; }
+#stickZone { position: absolute; left: 0; bottom: 0; width: 50%; height: 55%; touch-action: none; z-index: 3; }
+.stick { position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 2px solid rgba(239,229,207,.55); background: rgba(20,16,10,.3); pointer-events: none; left: 90px; top: calc(100% - 100px); }
+.stick i { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%; background: rgba(227,180,72,.9); }
+#tbtns { position: absolute; right: max(14px, env(safe-area-inset-right, 0px)); bottom: 24px; display: grid; grid-template-columns: auto auto; gap: 12px; z-index: 4; }
+.tb { width: 64px; height: 64px; border-radius: 50%; border: 2px solid #241a05; background: var(--gold); color: #241a05; font-weight: 700; font-size: 15px; padding: 0; touch-action: none; }
+.tb.alt { background: #efe5cf; }
+.tb.down { transform: translateY(2px); filter: brightness(.85); }
+body.drivetouch .cmdbar { display: none; }
 .keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 14px; margin: 0; }
 .keys dt { color: var(--gold); font-weight: 600; }
 .keys dd { margin: 0; }
@@ -111,6 +119,7 @@ table.rep td.n { text-align: right; color: var(--gold); font-weight: 600; }
         <button data-speed="2">2×</button>
         <button data-speed="4">4×</button>
       </div>
+      <button id="viewBtn">Boss view</button>
       <button data-drawer="race">Race</button>
       <button data-drawer="shop">Shop</button>
       <button data-drawer="crew">Crew</button>
@@ -121,6 +130,13 @@ table.rep td.n { text-align: right; color: var(--gold); font-weight: 600; }
     </div>
   </header>
 
+  <div id="stickZone" hidden><div class="stick" id="stick"><i></i></div></div>
+  <div id="tbtns" hidden>
+    <button class="tb alt" id="tbL" type="button" hidden>◀</button>
+    <button class="tb alt" id="tbR" type="button" hidden>▶</button>
+    <button class="tb alt" id="tbHop" type="button">Hop in</button>
+    <button class="tb" id="tbAct" type="button" hidden>Dig</button>
+  </div>
   <div id="toast" hidden><span id="toastText"></span><button id="toastCancel">Cancel</button></div>
 
   <footer class="cmdbar">
@@ -186,11 +202,38 @@ const creekZ = x => 70 + 8 * Math.sin(x * 0.03);
 const channelZ = x => -10 + 22 * Math.sin(x * 0.022 + 0.6);
 const POCKETS = [];
 for (let n = 0; n < 7; n++) POCKETS.push([srand() * 160 - 80, srand() * 120 - 85, 2.5 + srand() * 3, 5 + srand() * 8]);
+const TOWN = { x: -62, z: -58, r: 20, h: 7 };
+const ROAD = [[-16, 16], [-26, -4], [-38, -24], [-50, -40], [TOWN.x, TOWN.z]];
+const ROADK = new Uint8Array(NN);
+function natural(x, z) {
+  let h = 1.2 * Math.sin(x * 0.025) * Math.cos(z * 0.02) + 0.6 * Math.sin(x * 0.06 + 1) * Math.sin(z * 0.05) - z * 0.012 + 0.6;
+  h += TOWN.h * smooth(TOWN.r + 16, TOWN.r + 2, dist(x, z, TOWN.x, TOWN.z));     // the mesa the town sits on
+  h += 9 * smooth(58, 86, x) * (0.75 + 0.25 * Math.sin(z * 0.05));                // east ridge
+  h += 5 * smooth(-62, -88, z) * smooth(-20, 10, x);                              // south bluff
+  h += 2.4 * smooth(-70, -92, x);                                                 // west bench
+  h += 3.2 * Math.exp(-((x - 32) ** 2 + (z + 34) ** 2) / (2 * 9 * 9));            // knoll
+  return h;
+}
+function roadNear(x, z) {
+  let best = 1e9, s = 0, acc = 0;
+  for (let n = 0; n < ROAD.length - 1; n++) {
+    const [ax, az] = ROAD[n], [bx, bz] = ROAD[n + 1], L = dist(ax, az, bx, bz);
+    const t = clamp(((x - ax) * (bx - ax) + (z - az) * (bz - az)) / (L * L), 0, 1), d = dist(x, z, ax + (bx - ax) * t, az + (bz - az) * t);
+    if (d < best) { best = d; s = acc + t * L; }
+    acc += L;
+  }
+  return { d: best, s, total: acc };
+}
 function genGround() {
+  const h0 = natural(ROAD[0][0], ROAD[0][1]), h1 = natural(TOWN.x, TOWN.z);
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const x = wx(i), z = wx(j), k = I(i, j);
-    let h = 1.2 * Math.sin(x * 0.025) * Math.cos(z * 0.02) + 0.6 * Math.sin(x * 0.06 + 1) * Math.sin(z * 0.05) - z * 0.012 + 0.6;
-    h += 6 * Math.exp(-((x + 55) ** 2 + (z + 45) ** 2) / (2 * 16 * 16));
+    let h = natural(x, z);
+    const rn = roadNear(x, z);
+    if (rn.d < 8) h = lerp(h, lerp(h0, h1, rn.s / rn.total), 1 - smooth(3, 8, rn.d));
+    const td = dist(x, z, TOWN.x, TOWN.z);
+    if (td < TOWN.r + 2) h = lerp(h, h1, 1 - smooth(TOWN.r - 4, TOWN.r + 2, td));
+    ROADK[k] = rn.d < 2.6 || td < 11 ? 1 : 0;
     const cd = Math.abs(z - creekZ(x));
     h = lerp(h, -2.6, smooth(8, 3.5, cd));
     H[k] = H0[k] = h;
@@ -248,7 +291,7 @@ function colorVertex(i, j) {
     else if (h > BEDR[k] + 0.05) { const sp = hash(i * 3, j * 7) > 0.85 ? 0.08 : 0; c = [0.62 + sp, 0.46 + sp, 0.27]; }
     else c = [0.33, 0.33, 0.37];
   } else {
-    c = [0.44, 0.5, 0.26];
+    c = ROADK[k] ? (dist(wx(i), wx(j), TOWN.x, TOWN.z) < 11 ? [0.62, 0.55, 0.42] : [0.55, 0.46, 0.33]) : [0.44, 0.5, 0.26];
     const nb = (a, b) => Math.abs(H[I(clamp(a, 0, N - 1), clamp(b, 0, N - 1))] - h) / CELL;
     const st = smooth(0.6, 1.2, Math.max(nb(i + 1, j), nb(i - 1, j), nb(i, j + 1), nb(i, j - 1)));
     c = [lerp(c[0], 0.45, st), lerp(c[1], 0.36, st), lerp(c[2], 0.24, st)];
@@ -462,6 +505,28 @@ function makeLoader() {
   g.userData = { arms, load };
   return g;
 }
+function makeSUV() {
+  const g = new THREE.Group(), tan = M(0xc4a86e), wheels = [];
+  add(g, box(2.2, 0.9, 4.0), tan, 0, 1.1, 0);
+  add(g, box(2.05, 0.9, 2.3), tan, 0, 1.95, -0.35);
+  add(g, box(1.9, 0.6, 0.06), MAT.glass, 0, 2.0, 0.82);
+  add(g, box(2.3, 0.4, 0.2), MAT.dark, 0, 0.9, 2.08);
+  add(g, box(1.8, 0.1, 2.0), MAT.dark, 0, 2.45, -0.35);
+  for (const z of [1.3, -1.3]) for (const x of [-1.15, 1.15]) wheels.push(add(g, cyl(0.6, 0.6, 0.5, 12), MAT.rubber, x, 0.6, z, 0, 0, Math.PI / 2));
+  g.userData = { wheels };
+  return g;
+}
+function makeJimbo() {
+  const g = new THREE.Group(), legs = [];
+  legs.push(add(g, box(0.24, 0.85, 0.26), M(0x3a4a66), 0.15, 0.43, 0), add(g, box(0.24, 0.85, 0.26), M(0x3a4a66), -0.15, 0.43, 0));
+  add(g, box(0.66, 0.8, 0.4), M(0xb5562e), 0, 1.25, 0);
+  add(g, box(0.36, 0.36, 0.36), M(0xd9a47a), 0, 1.85, 0);
+  add(g, cyl(0.42, 0.42, 0.06, 12), M(0x6b4a2e), 0, 2.05, 0);
+  add(g, cyl(0.2, 0.24, 0.24, 10), M(0x6b4a2e), 0, 2.18, 0);
+  g.scale.setScalar(1.25);
+  g.userData = { legs };
+  return g;
+}
 function makePlant() {
   const g = new THREE.Group();
   add(g, box(6.5, 0.3, 11), MAT.dark, 0, 0.15, 0);
@@ -542,17 +607,18 @@ class Pile {
   take(v) { v = Math.min(v, this.vol); const g = this.vol > 0 ? this.gold * v / this.vol : 0; this.vol -= v; this.gold -= g; takeLoose(this.x, this.z, v, this.code); return [v, g]; }
 }
 function pileAt(kind, x, z) { return piles.find(p => p.kind === kind && dist(p.x, p.z, x, z) < 4) || new Pile(kind, x, z); }
-const MTYPE = { excavator: { name: 'Excavator', speed: 1.8, slope: 0.55 }, loader: { name: 'Loader', speed: 5, slope: 0.6 } };
+const MTYPE = { excavator: { name: 'Excavator', speed: 1.8, slope: 0.55 }, loader: { name: 'Loader', speed: 5, slope: 0.6 }, suv: { name: 'Crew 4x4', speed: 9, slope: 0.6 } };
 class Machine {
   constructor(type, x, z, heading = 0) {
     this.id = ID++; this.type = type; this.M = MTYPE[type]; this.x = x; this.z = z; this.y = hAt(x, z); this.heading = heading;
     this.path = null; this.pathI = 0; this.goal = null; this.order = null; this.state = 'Idle'; this.crewed = false; this.moving = false;
     this.cargo = 0; this.cargoGold = 0; this.timer = 0; this.auto = type === 'loader'; this.swing = 0; this.boom = -0.3; this.stick = 0.4; this.bucketFull = false;
-    this.mesh = type === 'excavator' ? makeExcavator() : makeLoader();
+    this.speed = 0; this.manualT = -1;
+    this.mesh = type === 'excavator' ? makeExcavator() : type === 'suv' ? makeSUV() : makeLoader();
     this.mesh.traverse(o => { o.userData.ent = this; });
     scene.add(this.mesh); machines.push(this);
   }
-  get name() { return this.M.name + ' ' + (machines.filter(m => m.type === this.type).indexOf(this) + 1); }
+  get name() { return this.type === 'suv' ? 'Crew 4x4' : this.M.name + ' ' + (machines.filter(m => m.type === this.type).indexOf(this) + 1); }
 }
 const STYPE = { plant: { name: 'Wash Plant', r: 5.6 }, generator: { name: 'Generator', r: 3.2 }, pump: { name: 'Water Pump', r: 1.8 }, bunkhouse: { name: 'Bunkhouse', r: 5.8 } };
 class Structure {
@@ -580,6 +646,8 @@ function setupClaim() {
   new Structure('bunkhouse', -26, 24, Math.PI);
   new Machine('excavator', 10, 8, Math.PI);
   new Machine('loader', -6, 14, Math.PI);
+  new Machine('suv', -17, 20, Math.PI * 0.8);
+  Object.assign(jim, { x: -19, z: 14, yaw: Math.PI, driving: null });
 }
 
 // =============================================================== simulation
@@ -588,11 +656,12 @@ function power() { return structures.filter(s => s.kind === 'generator' && s.on)
 function assignCrew() {
   let w = ledger.workers;
   for (const s of structures) s.crewed = false;
-  for (const m of machines) m.crewed = false;
+  for (const m of machines) m.crewed = !!m.driven || m.type === 'suv';
+  const free = m => !m.crewed;
   for (const s of structures) if (s.kind === 'plant' && w > 0) { s.crewed = true; w--; }
-  for (const m of machines) if (m.type === 'excavator' && m.order && w > 0) { m.crewed = true; w--; }
-  for (const m of machines) if (m.type === 'loader' && (m.auto || m.order) && w > 0) { m.crewed = true; w--; }
-  for (const m of machines) if (!m.crewed && w > 0) { m.crewed = true; w--; }
+  for (const m of machines) if (free(m) && m.type === 'excavator' && m.order && w > 0) { m.crewed = true; w--; }
+  for (const m of machines) if (free(m) && m.type === 'loader' && (m.auto || m.order) && w > 0) { m.crewed = true; w--; }
+  for (const m of machines) if (free(m) && w > 0) { m.crewed = true; w--; }
 }
 function spend(v) { ledger.money -= v; ledger.spent += v; }
 function travel(m, gx2, gz2, dt) {
@@ -725,8 +794,10 @@ function updateLedger(dt) {
     drawer = 'season'; renderDrawer(); sfx('cash', cam.x, cam.z);
   }
 }
+function inTown() { return dist(jim.x, jim.z, TOWN.x, TOWN.z) < TOWN.r + 6; }
 function sellGold() {
   if (ledger.goldSafe < 0.01) return toast('The safe is empty. Wash some pay dirt first.', 2200);
+  if (!inTown()) return toast('Gold sells at the Assay Office in town. Drive the Crew 4x4 up the hill road.', 3200);
   const v = ledger.goldSafe * ledger.price;
   ledger.money += v; ledger.earned += v; ledger.goldSold += ledger.goldSafe; ledger.goldSafe = 0;
   sfx('cash', cam.x, cam.z); toast(`Sold gold for ${money(v)}.`, 2400); refreshCmd();
@@ -734,7 +805,13 @@ function sellGold() {
 function step(dt) {
   simTime += dt;
   assignCrew();
-  for (const m of machines) { if (m.type === 'excavator') updateExcavator(m, dt); else updateLoader(m, dt); m.y = hAt(m.x, m.z); }
+  for (const m of machines) {
+    if (m.driven) continue;
+    if (m.type === 'excavator') updateExcavator(m, dt);
+    else if (m.type === 'loader') updateLoader(m, dt);
+    else { m.moving = false; m.state = 'Parked'; if (m.order && m.order.k === 'move') { m.state = 'Driving'; if (travel(m, m.order.x, m.order.z, dt)) { m.order = null; m.goal = null; } } }
+    m.y = hAt(m.x, m.z);
+  }
   updateStructures(dt);
   updateLedger(dt);
 }
@@ -796,6 +873,7 @@ function siteProblem(kind, x, z) {
   for (let a = 0; a < 8; a++) for (const rr of [0, r * 0.6, r]) { const h = hAt(x + Math.cos(a * Math.PI / 4) * rr, z + Math.sin(a * Math.PI / 4) * rr); lo = Math.min(lo, h); hi = Math.max(hi, h); }
   if (hi - lo > 2.2) return 'The ground there is too uneven.';
   if (hAt(x, z) < WATER_Y) return 'That spot is under water.';
+  if (dist(x, z, TOWN.x, TOWN.z) < TOWN.r + r + 2) return 'That is town land.';
   if (kind === 'pump' && !waterNear(x, z, 9)) return 'A pump needs water within 9 m.';
   return null;
 }
@@ -847,7 +925,7 @@ glCanvas.addEventListener('pointermove', e => {
   }
   if (!p.moved && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 7) p.moved = true;
   if (!p.moved) return;
-  if (p.type === 'mouse' && p.btn === 1) cam.yaw -= dx * 0.006; else panBy(dx, dy);
+  if (view === 'drive' || (p.type === 'mouse' && p.btn === 1)) cam.yaw -= dx * 0.006; else panBy(dx, dy);
 });
 function endPtr(e) {
   const p = ptrs.get(e.pointerId);
@@ -863,12 +941,19 @@ const keys = new Set();
 window.addEventListener('keydown', e => {
   if (e.target.closest && e.target.closest('input, select, textarea')) return;
   keys.add(e.key.toLowerCase());
-  if (e.key === ' ') { e.preventDefault(); setSpeed(timeScale ? 0 : 1); }
+  const kk = e.key.toLowerCase();
+  if (e.key === ' ') { e.preventDefault(); if (view === 'drive') pressed.add('act'); else setSpeed(timeScale ? 0 : 1); }
+  if (kk === 'p' && !e.repeat) setSpeed(timeScale ? 0 : 1);
+  if ((kk === 'x' || kk === 'f' || e.key === 'Enter') && !e.repeat) pressed.add('hop');
+  if (e.key === 'Tab') { e.preventDefault(); if (!e.repeat) setView(view === 'drive' ? 'boss' : 'drive'); }
   if (e.key === 'Escape') { if (toolMode) setTool(null); else select(null); }
 });
 window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 function keyPan(dt) {
   const s = 600 * dt;
+  if (keys.has('z')) cam.yaw += dt * 1.4;
+  if (keys.has('c')) cam.yaw -= dt * 1.4;
+  if (view === 'drive') { if (!jim.driving || jim.driving.type !== 'excavator') { if (keys.has('q')) cam.yaw += dt * 1.4; if (keys.has('e')) cam.yaw -= dt * 1.4; } return; }
   if (keys.has('w') || keys.has('arrowup')) panBy(0, s);
   if (keys.has('s') || keys.has('arrowdown')) panBy(0, -s);
   if (keys.has('d') || keys.has('arrowright')) panBy(-s, 0);
@@ -927,6 +1012,14 @@ function drawHUD() {
     else { sub = `${ledger.workers}/${beds()} beds used`; }
     badge(c, s[0], s[1], s0.name, sub, stripe, sel === s0, fill);
   }
+  for (const [label, dx, dz, sub] of TOWN_LABELS) {
+    const s = toScreen(TOWN.x + dx, hAt(TOWN.x, TOWN.z) + 6.5, TOWN.z + dz);
+    if (s) badge(c, s[0], s[1], label, sub, '#e3b448', false);
+  }
+  if (!jim.driving) {
+    const s = toScreen(jim.x, hAt(jim.x, jim.z) + 3.4, jim.z);
+    if (s) { c.fillStyle = '#e3b448'; c.beginPath(); c.moveTo(s[0] - 7, s[1] - 10); c.lineTo(s[0] + 7, s[1] - 10); c.lineTo(s[0], s[1]); c.fill(); }
+  }
   for (const m of machines) {
     const s = toScreen(m.x, m.y + 3.6, m.z);
     if (!s) continue;
@@ -957,10 +1050,32 @@ function renderStats() {
   const month = Math.min(12, Math.floor(Math.max(0, ledger.seasonT) / (T.seasonMin * 60) * 12) + 1);
   $('#stats').innerHTML = `<span class="${ledger.money < 0 ? 'neg' : ''}"><b>${money(ledger.money)}</b></span><span>Safe <b>${ledger.goldSafe.toFixed(1)} g</b></span><span>Gold <b>$${ledger.price.toFixed(0)}/g</b></span><span>Crew <b>${ledger.workers}/${beds()}</b></span><span>Month <b>${month}/12</b></span><span>${race.active ? 'Race' : 'Year'} <b>${mm}:${ss}</b></span>`;
 }
+let lastCmdSig = '';
 function refreshCmd() {
-  const info = $('#selInfo'), cmds = $('#cmds');
-  cmds.textContent = '';
-  const goldBtn = btn(`Sell gold ${ledger.goldSafe.toFixed(1)} g`, sellGold, 'goldbtn');
+  // Rebuild the buttons only when they change, so a tap never lands on a button that was just replaced.
+  const frag = document.createElement('div');
+  buildCmd($('#selInfo'), frag);
+  const sig = (sel ? sel.id || 'x' : 0) + '|' + (jim.driving ? jim.driving.id : 0) + '|' + [...frag.children].map(b => b.textContent + '#' + b.className).join('|');
+  if (sig !== lastCmdSig) { lastCmdSig = sig; $('#cmds').replaceChildren(...frag.children); }
+}
+function buildCmd(info, cmds) {
+  const goldBtn = btn(inTown() ? `Sell gold ${ledger.goldSafe.toFixed(1)} g` : `Gold ${ledger.goldSafe.toFixed(1)} g (sell in town)`, sellGold, inTown() ? 'goldbtn' : '');
+  if (jim.driving) {
+    const m = jim.driving;
+    info.innerHTML = `<b>Driving ${m.name}</b><br><span class="st">${DRIVE_HELP[m.type]}</span>`;
+    if (m.type !== 'suv') cmds.append(btn(actLabel(m), () => pressed.add('act'), 'on'));
+    cmds.append(btn('Hop out', () => pressed.add('hop')));
+    if (inTown()) cmds.append(goldBtn);
+    if (view === 'boss') cmds.append(btn('Drive view', () => setView('drive')));
+    return;
+  }
+  if (!sel && view === 'drive') {
+    const nm = nearestMachine(5);
+    info.innerHTML = `<b>On foot</b> · <span class="st">${inTown() ? 'In town. The Assay Office buys gold.' : nm ? `Hop in the ${nm.name} with X or the Hop in button.` : 'Walk with WASD or the stick. Tab switches to the boss view.'}</span>`;
+    if (nm) cmds.append(btn(`Hop in: ${nm.name}`, () => pressed.add('hop'), 'on'));
+    cmds.append(goldBtn, btn('Boss view', () => setView('boss')));
+    return;
+  }
   if (!sel) {
     const pw = power(), wt = waterSupply(), demandW = structures.filter(s => s.kind === 'plant').length * 100;
     info.innerHTML = `<b>Your claim.</b> <span class="st">Power ${pw} kW · water ${wt}/${demandW} · tap a machine, building or pile. Gold sits in the buried riverbed, richest right on bedrock.</span>`;
@@ -970,8 +1085,9 @@ function refreshCmd() {
   if (sel instanceof Machine) {
     const m = sel;
     info.innerHTML = `<b>${m.name}</b> · ${m.crewed ? 'operator on board' : 'no operator, hire more crew'}<br><span class="st">${m.state}${m.type === 'loader' && m.only ? ' · hauling from one chosen pile' : ''}</span>`;
-    if (m.type === 'excavator') cmds.append(btn('Dig here', () => setTool('dig')), btn('Stop', () => { m.order = null; refreshCmd(); }));
-    else cmds.append(btn(m.auto ? 'Auto-haul: on' : 'Auto-haul: off', () => { m.auto = !m.auto; m.order = null; m.job = null; m.only = null; refreshCmd(); }, m.auto ? 'on' : ''), btn('Haul from any pile', () => { m.only = null; m.auto = true; m.order = null; m.job = null; refreshCmd(); }));
+    if (m.type === 'suv') cmds.append(btn('Take the wheel', () => takeWheel(m), 'on'));
+    else if (m.type === 'excavator') cmds.append(btn('Dig here', () => setTool('dig')), btn('Stop', () => { m.order = null; refreshCmd(); }), btn('Take the wheel', () => takeWheel(m)));
+    else cmds.append(btn('Take the wheel', () => takeWheel(m)), btn(m.auto ? 'Auto-haul: on' : 'Auto-haul: off', () => { m.auto = !m.auto; m.order = null; m.job = null; m.only = null; refreshCmd(); }, m.auto ? 'on' : ''), btn('Haul from any pile', () => { m.only = null; m.auto = true; m.order = null; m.job = null; refreshCmd(); }));
     cmds.append(btn('Deselect', () => select(null)));
     if (m.type === 'loader') info.innerHTML += '<br><span class="st">Tip: tap a pay dirt pile to haul from just that pile.</span>';
     return;
@@ -1042,9 +1158,9 @@ function shopItem(name, price, desc, onBuy) {
 function deliver(type) {
   if (ledger.money < PRICES[type]) return toast(`Not enough money: costs ${money(PRICES[type])}.`, 2400);
   spend(PRICES[type]);
-  const m = new Machine(type, rand(-6, 6), -40, 0);
+  const m = new Machine(type, TOWN.x + 12 + rand(-2, 2), TOWN.z + 10 + rand(-2, 2), Math.PI * 0.75);
   m.order = { k: 'move', x: rand(-8, 8), z: rand(-4, 6) };
-  toast(`${m.name} delivered at the south road.`, 2600); select(m);
+  toast(`${m.name} delivered at the dealer in town. It is driving down to the claim.`, 3000); select(m);
 }
 function renderDrawer() {
   const d = $('#drawer'), body = $('#drawerBody');
@@ -1100,7 +1216,7 @@ function renderDrawer() {
   } else {
     $('#drawerTitle').textContent = 'How to mine';
     const dl = document.createElement('dl'); dl.className = 'keys';
-    for (const [k, v] of [['Tap', 'Select a machine, building or pile'], ['Tap ground', 'Drive the selected machine there'], ['Dig here', 'Excavator digs that spot down to bedrock'], ['Drag', 'Pan'], ['Pinch', 'Zoom and rotate'], ['Wheel', 'Zoom (mouse)'], ['Q / E', 'Rotate'], ['WASD', 'Pan'], ['Space', 'Pause']]) {
+    for (const [k, v] of [['Tap', 'Select a machine, building or pile'], ['Tap ground', 'Drive the selected machine there'], ['Dig here', 'Excavator digs that spot down to bedrock'], ['Drag', 'Pan'], ['Pinch', 'Zoom and rotate'], ['Wheel', 'Zoom (mouse)'], ['Tab', 'Switch drive view and boss view'], ['WASD', 'Walk or drive (pan in boss view)'], ['X / F', 'Hop in or out'], ['Space', 'Dig, dump, scoop (pause in boss view)'], ['Q / E', 'Swing the excavator (rotate the view otherwise)'], ['Z / C', 'Rotate the view'], ['P', 'Pause']]) {
       const dt = document.createElement('dt'); dt.textContent = k; const dd = document.createElement('dd'); dd.textContent = v; dl.append(dt, dd);
     }
     body.append(dl, h3('The ground'),
@@ -1202,7 +1318,7 @@ function sfx(kind, x, z) {
   if (now - SFX.voiceT > 0.1) { SFX.voiceT = now; SFX.voices = 0; }
   if (++SFX.voices > 8) return;
   let out;
-  if (kind === 'click' || kind === 'cash') { out = SFX.ctx.createGain(); out.gain.value = kind === 'cash' ? 0.35 : 0.2; out.connect(SFX.master); }
+  if (kind === 'click' || kind === 'cash' || kind === 'door') { out = SFX.ctx.createGain(); out.gain.value = kind === 'cash' ? 0.35 : 0.2; out.connect(SFX.master); }
   else { out = sndOut(x, z, 160); if (!out) return; }
   const t = now + 0.01;
   switch (kind) {
@@ -1211,6 +1327,8 @@ function sfx(kind, x, z) {
     case 'ding': tone(out, t, 'sine', 1760, 1700, 0.5, 0.25); tone(out, t, 'sine', 2637, 2600, 0.35, 0.12); break;
     case 'cash': tone(out, t, 'square', 1046, 1046, 0.08, 0.2); tone(out, t + 0.08, 'square', 1568, 1568, 0.18, 0.2); noiseBurst(out, t + 0.05, 0.4, 'highpass', 5000, 0, 0.5, 0.25, 0.3); break;
     case 'click': tone(out, t, 'sine', 880, 660, 0.06, 0.5); break;
+    case 'door': tone(out, t, 'sine', 180, 70, 0.14, 0.6); noiseBurst(out, t, 0.1, 'bandpass', 1500, 0, 1.5, 0.3, 0.08); break;
+    case 'horn': tone(out, t, 'square', 392, 392, 0.4, 0.18); tone(out, t, 'square', 494, 494, 0.4, 0.14); break;
   }
 }
 function updateAmbience() {
@@ -1233,6 +1351,254 @@ $('#sndBtn').addEventListener('click', () => {
   updateSoundLabel();
 });
 updateSoundLabel();
+
+// =============================================================== Jimbo, the 4x4 and hop-in driving (Road Crew style)
+const jim = { x: -19, z: 14, yaw: Math.PI, walk: 0, driving: null, mesh: makeJimbo() };
+scene.add(jim.mesh);
+let view = 'drive';
+const pressed = new Set(), touchIn = { lx: 0, ly: 0, swing: 0, on: false };
+const DRIVE = { suv: { max: 11, acc: 7, brake: 11, turn: 2.0, tracked: false, r: 2.0 }, loader: { max: 6, acc: 6, brake: 9, turn: 1.8, tracked: false, r: 1.9 }, excavator: { max: 2.6, acc: 3, brake: 6, turn: 1.0, tracked: true, r: 2.4 } };
+const DRIVE_HELP = {
+  suv: 'WASD or the stick drives. Take the hill road to town to sell gold. Space honks.',
+  excavator: 'WASD drives the tracks, Q/E (or ◀ ▶) swings, Space digs and dumps. Dumps sort themselves into pay dirt or waste piles. Dump next to the wash plant to fill its hopper.',
+  loader: 'Space scoops from a pile in front of you, then dumps. Dump at the wash plant to feed the hopper.',
+};
+const TOWN_LABELS = [['Assay Office', 0, -12, 'Sells gold'], ['Equipment Dealer', 13, 2, 'Deliveries'], ['Saloon', -13, 2, 'Opening soon'], ['Town square', 0, 0, null]];
+const TOWNSPOTS = [];
+(function buildTown() {
+  const y0 = hAt(TOWN.x, TOWN.z);
+  const bld = (dx, dz, w, d, h, wall, roof, yaw, porch) => {
+    const g = new THREE.Group();
+    add(g, box(w, h, d), M(wall), 0, h / 2, 0);
+    add(g, box(w + 0.6, 0.25, d + 0.6), M(roof), 0, h + 0.12, 0);
+    add(g, box(w * 0.9, h * 0.35, 0.2), M(wall), 0, h + 0.5, d / 2);
+    add(g, box(1.4, 2.2, 0.15), MAT.dark, 0, 1.1, d / 2 + 0.05);
+    if (porch) { add(g, box(w, 0.15, 2), MAT.wood, 0, 2.6, d / 2 + 1); for (const x of [-w / 2 + 0.3, w / 2 - 0.3]) add(g, box(0.18, 2.6, 0.18), MAT.wood, x, 1.3, d / 2 + 1.9); }
+    g.position.set(TOWN.x + dx, y0, TOWN.z + dz); g.rotation.y = yaw; scene.add(g);
+    TOWNSPOTS.push({ x: TOWN.x + dx, z: TOWN.z + dz, r: Math.max(w, d) * 0.55 });
+  };
+  bld(0, -12, 8, 6, 4, 0xd8c7a0, 0x6b4a2e, 0, true);           // assay office
+  bld(13, 2, 9, 7, 5, 0x8d6e4f, 0x3d4a57, -Math.PI / 2, false); // dealer shed
+  bld(-13, 2, 9, 7, 6.5, 0x9e3526, 0x3b2e24, Math.PI / 2, true); // saloon
+  bld(-6, 14, 5, 5, 3, 0xcfd8dc, 0x566573, Math.PI, false);
+  bld(7, 14, 5, 5, 3, 0xe9e3d5, 0x8b3a2b, Math.PI, false);
+  const tw = new THREE.Group();
+  for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) add(tw, box(0.25, 6, 0.25), MAT.wood, x, 3, z);
+  add(tw, cyl(1.8, 1.8, 2.4, 12), MAT.wood, 0, 7.2, 0);
+  tw.position.set(TOWN.x + 15, y0, TOWN.z - 13); scene.add(tw);
+  TOWNSPOTS.push({ x: TOWN.x + 15, z: TOWN.z - 13, r: 2 });
+  const well = add(scene, cyl(1, 1, 0.9, 12), M(0x8a8273), TOWN.x, y0 + 0.45, TOWN.z);
+  TOWNSPOTS.push({ x: TOWN.x, z: TOWN.z, r: 1.2 });
+})();
+function blockTown() {
+  for (const t of TOWNSPOTS) { const [i0, j0, i1, j1] = cellBox(t.x, t.z, t.r + 0.5); for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (dist(wx(i), wx(j), t.x, t.z) <= t.r + 0.5) blocked[I(i, j)] = 1; }
+}
+blockTown();
+function setView(v) {
+  view = v;
+  $('#viewBtn').textContent = v === 'drive' ? 'Boss view' : 'Drive view';
+  if (v === 'drive') { cam.size = Math.min(cam.size, 26); select(null); }
+  updateTouchUI(); refreshCmd();
+}
+$('#viewBtn').addEventListener('click', () => setView(view === 'drive' ? 'boss' : 'drive'));
+function nearestMachine(r) {
+  let best = null, bd = r;
+  for (const m of machines) { const d = dist(m.x, m.z, jim.x, jim.z); if (d < bd) { bd = d; best = m; } }
+  return best;
+}
+function enterMachine(m) {
+  jim.driving = m; m.driven = true; m.order = null; m.job = null; m.goal = null; m.speed = 0; m.manualT = -1;
+  if (m.type === 'loader') m.auto = false;
+  if (m.type === 'excavator') { m.swing = 0; m.bucketFull = false; }
+  sfx('door', m.x, m.z);
+}
+function takeWheel(m) { if (jim.driving) exitMachine(); enterMachine(m); jim.x = m.x; jim.z = m.z; setView('drive'); }
+function exitMachine() {
+  const m = jim.driving;
+  m.driven = false; m.speed = 0; m.manualT = -1; jim.driving = null;
+  const a = m.heading + Math.PI / 2;
+  jim.x = m.x + Math.sin(a) * 2.8; jim.z = m.z + Math.cos(a) * 2.8;
+  pushOut(jim, 0.5);
+  sfx('door', m.x, m.z);
+}
+function pushOut(e, r) {
+  const push = (ox, oz, or) => {
+    const dx = e.x - ox, dz = e.z - oz, d = Math.hypot(dx, dz), min = r + or;
+    if (d < min && d > 1e-4) { e.x += dx / d * (min - d); e.z += dz / d * (min - d); if (e.speed) e.speed *= 0.85; }
+  };
+  for (const s of structures) push(s.x, s.z, s.S.r * 0.8);
+  for (const t of TOWNSPOTS) push(t.x, t.z, t.r);
+  for (const m of machines) if (m !== e && m !== jim.driving) push(m.x, m.z, 1.8);
+  e.x = clamp(e.x, -HALF + 3, HALF - 3); e.z = clamp(e.z, -HALF + 3, HALF - 3);
+}
+function driveMachine(m, inp, dt) {
+  const D = DRIVE[m.type], fx = Math.sin(m.heading), fz = Math.cos(m.heading);
+  const slope = (hAt(m.x + fx * 1.6, m.z + fz * 1.6) - hAt(m.x - fx * 1.6, m.z - fz * 1.6)) / 3.2;
+  m.speed -= 7 * clamp(slope, -1, 1) * dt * (D.tracked ? 0.3 : 1);
+  if (inp.fwd) m.speed += inp.fwd * (inp.fwd * m.speed < 0 ? D.brake : D.acc) * dt;
+  else { const b = D.brake * dt; m.speed = Math.abs(m.speed) < b ? 0 : m.speed - Math.sign(m.speed) * b; }
+  m.speed = clamp(m.speed, -D.max * 0.5, D.max);
+  m.heading += D.tracked ? inp.turn * D.turn * dt * (m.speed < -0.1 ? -1 : 1) : inp.turn * D.turn * dt * clamp(m.speed / (D.max * 0.35), -1, 1);
+  const st = m.speed * dt, nx = m.x + Math.sin(m.heading) * st, nz = m.z + Math.cos(m.heading) * st;
+  const rise = Math.abs(st) > 1e-4 ? (hAt(nx, nz) - hAt(m.x, m.z)) / Math.abs(st) : 0;
+  if (hAt(nx, nz) < WATER_Y - 0.9) { m.speed = 0; hintOnce('deep', 'Too deep. Machines cannot drive through that water.'); }
+  else if (rise > 1.3) { m.speed = 0; hintOnce('wall', 'Too steep to climb. Dig a ramp or go around.'); }
+  else { m.x = nx; m.z = nz; }
+  pushOut(m, D.r);
+  m.moving = Math.abs(m.speed) > 0.2;
+}
+const hintT = {};
+function hintOnce(key, text) { const now = performance.now(); if ((hintT[key] || 0) > now) return; hintT[key] = now + 4000; toast(text, 2600); }
+function tip(m, reach) { const a = m.heading + m.swing; return [m.x + Math.sin(a) * reach, m.z + Math.cos(a) * reach]; }
+function nearPlant(x, z, r) { return structures.find(s => s.kind === 'plant' && dist(x, z, s.x, s.z) < s.S.r + r); }
+function actLabel(m) { return m.type === 'excavator' ? (m.bucketFull ? 'Dump' : 'Dig') : m.type === 'loader' ? (m.cargo > 0 ? 'Dump' : 'Scoop') : 'Honk'; }
+function dropLoad(x, z, vol, gold, kind) {
+  const pl = nearPlant(x, z, 3.5);
+  if (pl && kind === 'pay') { pl.hopper += vol; pl.hopperGold += gold; sfx('dump', pl.x, pl.z); toast(`Into the hopper: ${vol.toFixed(1)} m³ of pay dirt.`, 1600); return; }
+  const p = piles.find(q => q.kind === kind && dist(q.x, q.z, x, z) < 4) || new Pile(kind, x, z);
+  p.add(vol, gold);
+  sfx('dump', x, z); puff(dustTex, x, hAt(x, z) + 1, z, 3.5, 1.6, 0.8);
+}
+function manualExcavator(m, inp, dt) {
+  m.swing += inp.swing * 1.5 * dt;
+  if (m.manualT < 0 && inp.action) m.manualT = 0;
+  if (m.manualT >= 0) {
+    const prev = m.manualT;
+    m.manualT += dt / 0.9;
+    if (prev < 0.5 && m.manualT >= 0.5) {
+      const [tx, tz] = tip(m, 6.2);
+      if (!m.bucketFull) {
+        const b = digAt(tx, tz, 1.6, T.bucket);
+        if (!b || b.vol < 0.05) toast('Nothing to dig there. That is bedrock or out of reach.', 1800);
+        else {
+          m.bucketFull = true; m.bucketVol = b.vol; m.bucketGold = b.gold; m.bucketGrade = b.gold / Math.max(0.01, b.vol);
+          sfx('dig', tx, tz); puff(dustTex, tx, hAt(tx, tz) + 0.6, tz, 3, 1.4, 0.6);
+          toast(m.bucketGrade >= T.cutoff ? `Pay dirt! ${m.bucketGrade.toFixed(1)} g per m³. Dump it beside the plant.` : 'Overburden, no gold worth washing. Dump it on the waste pile.', 1800);
+        }
+      } else {
+        dropLoad(tx, tz, m.bucketVol, m.bucketGold, m.bucketGrade >= T.cutoff ? 'pay' : 'waste');
+        m.bucketFull = false;
+      }
+    }
+    if (m.manualT >= 1) m.manualT = -1;
+  }
+  const t = m.manualT >= 0 ? Math.sin(Math.PI * m.manualT) : 0;
+  m.boom = lerp(-0.3, 0.35, t); m.stick = lerp(0.4, 1.0, t);
+  m.state = 'You are digging';
+  if (m.manualT >= 0) spend(T.fuelExc * dt);
+}
+function manualLoader(m, inp) {
+  if (!inp.action) return;
+  const [bx, bz] = [m.x + Math.sin(m.heading) * 3, m.z + Math.cos(m.heading) * 3];
+  if (m.cargo <= 0) {
+    const p = piles.filter(q => q.vol > 0.2 && dist(q.x, q.z, bx, bz) < 4.5).sort((a, b) => dist(a.x, a.z, bx, bz) - dist(b.x, b.z, bx, bz))[0];
+    if (!p) return toast('Drive the bucket up to a pile first.', 1600);
+    const [v, g] = p.take(T.loaderCap);
+    m.cargo = v; m.cargoGold = g; m.cargoKind = p.kind; sfx('dump', p.x, p.z);
+  } else {
+    dropLoad(bx, bz, m.cargo, m.cargoGold, m.cargoKind || 'pay');
+    m.cargo = 0; m.cargoGold = 0;
+  }
+}
+function readInput() {
+  const k = c => keys.has(c) ? 1 : 0, drive = view === 'drive';
+  const inp = {
+    fwd: drive ? clamp(k('w') + k('arrowup') - k('s') - k('arrowdown') - touchIn.ly, -1, 1) : 0,
+    turn: drive ? clamp(k('a') + k('arrowleft') - k('d') - k('arrowright') - touchIn.lx, -1, 1) : 0,
+    swing: drive ? clamp(k('q') - k('e') + touchIn.swing, -1, 1) : 0,
+    action: pressed.has('act'), hop: pressed.has('hop'),
+  };
+  pressed.clear();
+  return inp;
+}
+let wasInTown = false;
+function updatePlayer(dt, live) {
+  const inp = readInput();
+  if (!live) { inp.fwd = inp.turn = inp.swing = 0; inp.action = false; }
+  if (inp.hop) {
+    if (jim.driving) exitMachine();
+    else { const m = nearestMachine(5); if (m) { enterMachine(m); toast(DRIVE_HELP[m.type], 4000); } else toast('Walk up to a machine or the 4x4 to hop in.', 1800); }
+    refreshCmd(); updateTouchUI();
+  }
+  const m = jim.driving;
+  if (m) {
+    driveMachine(m, inp, dt);
+    m.y = hAt(m.x, m.z);
+    if (m.type === 'excavator') manualExcavator(m, inp, dt);
+    else if (m.type === 'loader') { manualLoader(m, inp); m.state = 'You are driving'; if (m.moving) spend(T.fuelLoader * dt); }
+    else { m.state = 'You are driving'; if (inp.action) sfx('horn', m.x, m.z); }
+    if (m.type === 'excavator' && m.moving) spend(T.fuelExc * dt);
+    jim.x = m.x; jim.z = m.z;
+  } else {
+    const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw), rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
+    let mx = fx * inp.fwd - rx * inp.turn, mz = fz * inp.fwd - rz * inp.turn;
+    const mag = Math.hypot(mx, mz);
+    if (mag > 0.05) {
+      mx /= Math.max(1, mag); mz /= Math.max(1, mag);
+      const nx = jim.x + mx * 6 * dt, nz = jim.z + mz * 6 * dt;
+      if (hAt(nx, nz) > WATER_Y - 0.5) { jim.x = nx; jim.z = nz; }
+      jim.yaw = Math.atan2(mx, mz); jim.walk += dt * 10;
+    }
+    pushOut(jim, 0.5);
+    const legs = jim.mesh.userData.legs;
+    legs[0].rotation.x = Math.sin(jim.walk) * 0.5 * Math.min(1, mag); legs[1].rotation.x = -legs[0].rotation.x;
+  }
+  jim.mesh.visible = !m;
+  jim.mesh.position.set(jim.x, hAt(jim.x, jim.z), jim.z); jim.mesh.rotation.y = jim.yaw;
+  if (view === 'drive') { const kf = 1 - Math.exp(-5 * dt); cam.x = lerp(cam.x, jim.x, kf); cam.z = lerp(cam.z, jim.z, kf); }
+  const it = inTown();
+  if (it && !wasInTown) toast(ledger.goldSafe > 0.05 ? `Welcome to town. The Assay Office will buy your ${ledger.goldSafe.toFixed(1)} g.` : 'Welcome to town. Bring gold to the Assay Office.', 3000);
+  wasInTown = it;
+}
+
+// --- touch: left thumb stick + buttons in drive view
+const STICK_R = 50;
+let stickPtr = null;
+const stickEl = $('#stick');
+function stickHome() { stickEl.style.left = '90px'; stickEl.style.top = 'calc(100% - 100px)'; stickEl.firstChild.style.transform = ''; }
+function updateTouchUI() {
+  const on = touchIn.on && view === 'drive';
+  document.body.classList.toggle('drivetouch', on);
+  $('#stickZone').hidden = !on; $('#tbtns').hidden = !on;
+  if (!on) return;
+  const m = jim.driving;
+  $('#tbHop').textContent = m ? 'Hop out' : 'Hop in';
+  $('#tbAct').hidden = !m; if (m) $('#tbAct').textContent = actLabel(m);
+  $('#tbL').hidden = $('#tbR').hidden = !(m && m.type === 'excavator');
+}
+function enableTouch() { if (touchIn.on) return; touchIn.on = true; updateTouchUI(); }
+window.addEventListener('touchstart', enableTouch, { passive: true });
+if (window.matchMedia && matchMedia('(pointer: coarse)').matches) touchIn.on = true;
+const zone = $('#stickZone');
+zone.addEventListener('pointerdown', e => {
+  if (stickPtr !== null) return;
+  stickPtr = e.pointerId; try { zone.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  const r = zone.getBoundingClientRect();
+  stickEl.style.left = (e.clientX - r.left) + 'px'; stickEl.style.top = (e.clientY - r.top) + 'px';
+  zone.dataset.x0 = e.clientX; zone.dataset.y0 = e.clientY;
+  e.preventDefault();
+});
+zone.addEventListener('pointermove', e => {
+  if (e.pointerId !== stickPtr) return;
+  let dx = e.clientX - +zone.dataset.x0, dy = e.clientY - +zone.dataset.y0;
+  const d = Math.hypot(dx, dy);
+  if (d > STICK_R) { dx *= STICK_R / d; dy *= STICK_R / d; }
+  stickEl.firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
+  const dead = v => Math.abs(v) < 0.12 ? 0 : v;
+  touchIn.lx = dead(dx / STICK_R); touchIn.ly = dead(dy / STICK_R);
+});
+const endStick = e => { if (e.pointerId !== stickPtr) return; stickPtr = null; touchIn.lx = touchIn.ly = 0; stickHome(); };
+zone.addEventListener('pointerup', endStick); zone.addEventListener('pointercancel', endStick);
+function holdBtn(id, down, up) {
+  const b = $('#' + id);
+  b.addEventListener('pointerdown', e => { e.preventDefault(); b.classList.add('down'); down(); try { b.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ } });
+  const rel = () => { b.classList.remove('down'); if (up) up(); };
+  b.addEventListener('pointerup', rel); b.addEventListener('pointercancel', rel);
+}
+holdBtn('tbAct', () => pressed.add('act'));
+holdBtn('tbHop', () => pressed.add('hop'));
+holdBtn('tbL', () => { touchIn.swing = 1; }, () => { touchIn.swing = 0; });
+holdBtn('tbR', () => { touchIn.swing = -1; }, () => { touchIn.swing = 0; });
 
 // =============================================================== multiplayer race (artifact room: live presence, nothing stored)
 // Every player digs an identical claim (same seed) on their own device. Presence carries
@@ -1330,7 +1696,7 @@ function resetClaim() {
   for (const s of structures) scene.remove(s.mesh);
   machines.length = 0; structures.length = 0; piles.length = 0;
   loose.fill(0); looseKind.fill(0); blocked.fill(0);
-  genGround();
+  genGround(); blockTown();
   Object.assign(ledger, { money: 25000, goldSafe: 0, goldWashed: 0, goldSold: 0, earned: 0, spent: 0, workers: 3, price: T.goldPrice, seasonT: 0, over: false, priceT: 0, priceN: 0 });
   sel = null; toolMode = null; hideToast(); surveyBought = false; survey = false;
   $('#surveyBtn').classList.remove('on'); $('#surveyBtn').textContent = 'Survey';
@@ -1397,7 +1763,8 @@ function syncMeshes(dt) {
     m.mesh.rotation.set(-tilt, m.heading, 0, 'YXZ');
     const u = m.mesh.userData;
     if (m.type === 'excavator') { u.house.rotation.y = m.swing; u.boom.rotation.x = m.boom; u.stick.rotation.x = m.stick; u.load.visible = !!m.bucketFull; }
-    else { u.arms.rotation.x = m.cargo > 0 ? -0.45 : 0.15; u.load.visible = m.cargo > 0; }
+    else if (m.type === 'loader') { u.arms.rotation.x = m.cargo > 0 ? -0.45 : 0.15; u.load.visible = m.cargo > 0; }
+    else { m.spin = (m.spin || 0) + (m.speed || 0) * dt / 0.6; for (const w of u.wheels) w.rotation.x = m.spin; }
   }
   for (const s of structures) if (s.kind === 'plant' && s.running) s.mesh.userData.trommel.rotation.y += dt * 2.5;
 }
@@ -1408,6 +1775,7 @@ function frame(now) {
   const t0 = performance.now();
   keyPan(real);
   const sc = race.active ? (Date.now() < race.startAt || ledger.over ? 0 : 1) : timeScale;
+  updatePlayer(real, sc > 0);
   let acc = real * sc;
   while (acc > 0) { const d = Math.min(acc, 0.05); step(d); acc -= d; }
   syncMeshes(real * sc);
@@ -1422,7 +1790,7 @@ function frame(now) {
   perf.sim += t1 - t0; perf.draw += t2 - t1; perf.frames++; perf.t += real;
   if (perf.t >= 0.5) { $('#perf').textContent = `${Math.round(perf.frames / perf.t)} fps · logic ${(perf.sim / perf.frames).toFixed(1)} ms · draw ${(perf.draw / perf.frames).toFixed(1)} ms`; perf.frames = 0; perf.t = 0; perf.sim = 0; perf.draw = 0; }
   uiT -= real;
-  if (uiT <= 0) { uiT = 0.4; renderStats(); refreshCmd(); renderBoard(); pushPresence(); }
+  if (uiT <= 0) { uiT = 0.4; renderStats(); refreshCmd(); renderBoard(); pushPresence(); updateTouchUI(); }
   requestAnimationFrame(frame);
 }
 function resize() { renderer.setSize(glCanvas.clientWidth, glCanvas.clientHeight, false); }
@@ -1430,11 +1798,12 @@ window.addEventListener('resize', resize);
 
 setupClaim();
 for (const s of structures) if (s.kind === 'pump') s.wetOK = waterNear(s.x, s.z, 9) > 0;
-window.__claim = { machines, structures, piles, ledger, T, digAt };
+window.__claim = { machines, structures, piles, ledger, T, digAt, jim, TOWN };
 resize();
 renderStats();
 refreshCmd();
-toast('Your claim. Select the excavator and tap Dig here near the plant. The old riverbed runs right through it.', 5500);
+setView('drive');
+toast(touchIn.on ? 'You are Jimbo. Walk to the excavator with the left stick, tap Hop in, swing with ◀ ▶ and tap Dig. Boss view is up top.' : 'You are Jimbo. Walk to the excavator (WASD), hop in with X, swing with Q/E and dig with Space. Tab is the boss view.', 7000);
 requestAnimationFrame(frame);
 })();
 </script>
