@@ -1,0 +1,1251 @@
+<title>Bedrock Claim</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rye&family=Barlow+Condensed:wght@500;600;700&display=swap">
+<style>
+/* Layout: full-screen isometric claim; a weathered assay-office HUD floats on top (ledger strip, controls, command bar, side drawer). */
+:root {
+  --bg: #15130f;
+  --panel: rgba(27, 23, 17, 0.93);
+  --panel-solid: #1d1913;
+  --line: #3b3226;
+  --ink: #efe5cf;
+  --muted: #a99b80;
+  --gold: #e3b448;
+  --water: #6fb1d6;
+  --danger: #d4574a;
+  --ok: #8db36a;
+  --display: "Rye", "Georgia", serif;
+  --ui: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: var(--ui); font-size: 15px; overflow: hidden; }
+#app { position: relative; width: 100%; height: 100%; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+#gl, #hud { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#hud { pointer-events: none; }
+button, select { font-family: var(--ui); font-size: 15px; font-weight: 600; letter-spacing: 0.02em; color: var(--ink); }
+button { background: #2a241b; border: 1px solid var(--line); border-radius: 6px; padding: 7px 11px; cursor: pointer; min-height: 36px; }
+button:hover { border-color: #5a4c38; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+button.on { background: var(--gold); color: #241a05; border-color: var(--gold); }
+button.dim { opacity: 0.5; }
+button.warn { border-color: #6b3a33; color: #f0b8ad; }
+button.goldbtn { background: #4a3812; border-color: var(--gold); color: #ffe3a0; }
+
+.topbar { position: absolute; top: 8px; left: 0; right: 0; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; justify-content: space-between; pointer-events: none; }
+.topbar > * { pointer-events: auto; }
+.ledger { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px 7px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ledger h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 21px; line-height: 1.1; color: var(--gold); letter-spacing: 0.02em; }
+.stats { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.stats b { color: var(--gold); font-weight: 700; }
+.stats .neg { color: var(--danger); }
+.perf { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.seg { display: inline-flex; gap: 2px; }
+.seg button { border-radius: 4px; padding: 7px 9px; }
+
+.cmdbar { position: absolute; bottom: 8px; left: 0; right: 0; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); display: flex; gap: 8px; align-items: flex-end; pointer-events: none; }
+.cmdbar > * { pointer-events: auto; }
+.selpanel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 680px; }
+.selinfo { font-size: 15px; line-height: 1.25; }
+.selinfo b { color: var(--gold); font-weight: 700; }
+.selinfo .st { color: var(--muted); font-size: 13px; }
+.cmds { display: flex; flex-wrap: wrap; gap: 6px; }
+
+#toast { position: absolute; left: 50%; transform: translateX(-50%); top: 92px; background: var(--panel-solid); border: 1px solid var(--gold); color: var(--ink); border-radius: 8px; padding: 8px 12px; display: flex; gap: 10px; align-items: center; max-width: calc(100% - 32px); font-size: 15px; z-index: 5; }
+#toast button { min-height: 30px; padding: 4px 10px; }
+
+#drawer { position: absolute; top: 76px; right: max(12px, env(safe-area-inset-right, 0px)); bottom: 96px; width: 370px; max-width: calc(100% - 24px); background: var(--panel-solid); border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; z-index: 6; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+.dhead { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); gap: 8px; }
+.dhead h2 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 19px; color: var(--gold); }
+.dbody { overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.dbody h3 { margin: 4px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 600; }
+.dbody p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.4; }
+.shopitem { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.shopitem .nm { font-weight: 700; font-size: 16px; }
+.shopitem .ds { grid-column: 1 / 2; color: var(--muted); font-size: 13px; line-height: 1.3; }
+.shopitem button { grid-row: 1 / 3; grid-column: 2; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; }
+.slider { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; }
+.slider label { font-size: 14px; }
+.slider output { font-variant-numeric: tabular-nums; color: var(--gold); font-weight: 600; font-size: 14px; }
+.slider input { grid-column: 1 / -1; width: 100%; accent-color: var(--gold); }
+.slider.changed label::after { content: " · changed"; color: var(--gold); }
+.copybox { width: 100%; min-height: 90px; background: #12100c; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.4 ui-monospace, Menlo, monospace; padding: 6px; }
+table.rep { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 15px; }
+table.rep td { padding: 5px 4px; border-bottom: 1px solid #2c261d; }
+table.rep td.n { text-align: right; color: var(--gold); font-weight: 600; }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 14px; margin: 0; }
+.keys dt { color: var(--gold); font-weight: 600; }
+.keys dd { margin: 0; }
+
+@media (max-width: 640px) {
+  .ledger h1 { font-size: 17px; }
+  .stats { font-size: 13px; gap: 0 10px; }
+  #drawer { top: auto; left: max(8px, env(safe-area-inset-left, 0px)); right: max(8px, env(safe-area-inset-right, 0px)); width: auto; max-width: none; bottom: 8px; height: 62%; }
+  #toast { top: auto; bottom: 150px; }
+}
+</style>
+
+<div id="app">
+  <canvas id="gl" aria-label="Mining claim"></canvas>
+  <canvas id="hud"></canvas>
+
+  <header class="topbar">
+    <div class="ledger">
+      <h1>Bedrock Claim</h1>
+      <div class="stats" id="stats"></div>
+      <div class="perf" id="perf">measuring…</div>
+    </div>
+    <div class="controls">
+      <div class="seg" id="speedSeg" role="group" aria-label="Game speed">
+        <button data-speed="0">Pause</button>
+        <button data-speed="1" class="on">1×</button>
+        <button data-speed="2">2×</button>
+        <button data-speed="4">4×</button>
+      </div>
+      <button data-drawer="shop">Shop</button>
+      <button data-drawer="crew">Crew</button>
+      <button id="surveyBtn">Survey</button>
+      <button data-drawer="tune">Tune</button>
+      <button id="sndBtn" aria-pressed="true">Tap for sound</button>
+      <button data-drawer="help">Controls</button>
+    </div>
+  </header>
+
+  <div id="toast" hidden><span id="toastText"></span><button id="toastCancel">Cancel</button></div>
+
+  <footer class="cmdbar">
+    <div class="selpanel">
+      <div class="selinfo" id="selInfo"></div>
+      <div class="cmds" id="cmds"></div>
+    </div>
+  </footer>
+
+  <aside id="drawer" hidden>
+    <div class="dhead"><h2 id="drawerTitle">Shop</h2><button id="drawerClose">Close</button></div>
+    <div class="dbody" id="drawerBody"></div>
+  </aside>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const rand = (a = 0, b = 1) => a + Math.random() * (b - a);
+const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+const dist = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
+const money = v => (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString('en-US');
+
+// =============================================================== tuning
+const DEFAULT_T = {
+  digRate: 0.8, bucket: 1.6, siteRadius: 3.5, loaderCap: 1.6, washRate: 0.14, hopperCap: 20, recovery: 0.85, cutoff: 0.6,
+  wage: 0.9, fuelExc: 0.35, fuelLoader: 0.15, fuelGen: 0.4, fuelPump: 0.12, repose: 0.75, goldPrice: 115, seasonMin: 20,
+};
+const T_FIELDS = [
+  ['digRate', 'Excavator digging, m³ per second', 0.05, 2, 0.05], ['bucket', 'Excavator bucket, m³', 0.3, 4, 0.1], ['siteRadius', 'Dig site radius, m', 2, 10, 0.5],
+  ['loaderCap', 'Loader bucket, m³', 0.5, 6, 0.1], ['washRate', 'Wash plant, m³ per second', 0.02, 1, 0.01], ['hopperCap', 'Wash plant hopper, m³', 4, 80, 1],
+  ['recovery', 'Gold recovery at the plant', 0.3, 1, 0.01], ['cutoff', 'Pay dirt cutoff, g per m³', 0, 4, 0.1],
+  ['wage', 'Wage per worker, $ per second', 0, 5, 0.1], ['fuelExc', 'Excavator diesel, $ per second', 0, 3, 0.05], ['fuelLoader', 'Loader diesel, $ per second', 0, 3, 0.05],
+  ['fuelGen', 'Generator diesel, $ per second', 0, 3, 0.05], ['fuelPump', 'Pump diesel, $ per second', 0, 2, 0.02], ['repose', 'Pile steepness (angle of repose)', 0.3, 1.5, 0.05],
+  ['goldPrice', 'Starting gold price, $ per gram', 20, 400, 5], ['seasonMin', 'Season length, minutes', 5, 90, 1],
+];
+const T = Object.assign({}, DEFAULT_T);
+const STORE_KEY = 'bedrockClaim.tune.v1';
+try { Object.assign(T, JSON.parse(localStorage.getItem(STORE_KEY) || '{}')); } catch (e) { /* storage unavailable */ }
+function saveTune() { try { localStorage.setItem(STORE_KEY, JSON.stringify(T)); } catch (e) { /* ignore */ } }
+const PRICES = { excavator: 14000, loader: 6000, pump: 2500, generator: 8000, plant: 18000, bunkhouse: 5000, survey: 1500, hire: 600 };
+
+// =============================================================== ground: surface, overburden, pay gravel, bedrock
+const SIZE = 200, N = 161, CELL = SIZE / (N - 1), HALF = SIZE / 2, NN = N * N, WATER_Y = -1.4;
+const H = new Float32Array(NN), H0 = new Float32Array(NN), PAYTOP = new Float32Array(NN), BEDR = new Float32Array(NN), GRADE = new Float32Array(NN);
+const loose = new Float32Array(NN), looseKind = new Uint8Array(NN);
+const I = (i, j) => j * N + i;
+const gx = x => (x + HALF) / CELL;
+const wx = i => i * CELL - HALF;
+function hAt(x, z) {
+  const fx = clamp(gx(x), 0, N - 1.0001), fz = clamp(gx(z), 0, N - 1.0001);
+  const i = fx | 0, j = fz | 0, u = fx - i, v = fz - j;
+  return lerp(lerp(H[I(i, j)], H[I(i + 1, j)], u), lerp(H[I(i, j + 1)], H[I(i + 1, j + 1)], u), v);
+}
+let seed = 20261030;
+function srand() { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }
+const hash = (i, j) => { const s = Math.sin(i * 12.9898 + j * 78.233) * 43758.5453; return s - Math.floor(s); };
+const creekZ = x => 70 + 8 * Math.sin(x * 0.03);
+const channelZ = x => -10 + 22 * Math.sin(x * 0.022 + 0.6);
+const POCKETS = [];
+for (let n = 0; n < 7; n++) POCKETS.push([srand() * 160 - 80, srand() * 120 - 85, 2.5 + srand() * 3, 5 + srand() * 8]);
+function genGround() {
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const x = wx(i), z = wx(j), k = I(i, j);
+    let h = 1.2 * Math.sin(x * 0.025) * Math.cos(z * 0.02) + 0.6 * Math.sin(x * 0.06 + 1) * Math.sin(z * 0.05) - z * 0.012 + 0.6;
+    h += 6 * Math.exp(-((x + 55) ** 2 + (z + 45) ** 2) / (2 * 16 * 16));
+    const cd = Math.abs(z - creekZ(x));
+    h = lerp(h, -2.6, smooth(8, 3.5, cd));
+    H[k] = H0[k] = h;
+    const over = 1.4 + 0.9 * (0.5 + 0.5 * Math.sin(x * 0.07 + z * 0.05)) + Math.max(0, h) * 0.22;
+    const pay = 1.6 + 0.8 * (0.5 + 0.5 * Math.cos(x * 0.05 - z * 0.06));
+    PAYTOP[k] = h - (cd < 6 ? 0.4 : over);
+    BEDR[k] = PAYTOP[k] - pay;
+    const dp = Math.abs(z - channelZ(x));
+    let g = (0.15 + 4.0 * Math.exp(-(dp * dp) / (2 * 9 * 9))) * (0.65 + 0.7 * hash(i, j));
+    for (const [px, pz, pr, pg] of POCKETS) g += pg * Math.exp(-((x - px) ** 2 + (z - pz) ** 2) / (2 * pr * pr));
+    GRADE[k] = g;
+  }
+}
+genGround();
+
+// =============================================================== three.js
+const glCanvas = $('#gl'), hud = $('#hud'), hctx = hud.getContext('2d');
+const renderer = new THREE.WebGLRenderer({ canvas: glCanvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xb8b3a1);
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -600, 1200);
+scene.add(new THREE.HemisphereLight(0xf2ead8, 0x4d4130, 0.8));
+const sunL = new THREE.DirectionalLight(0xfff0d0, 0.85); sunL.position.set(-60, 120, -40); scene.add(sunL);
+
+const tGeo = new THREE.BufferGeometry();
+const tPos = new Float32Array(NN * 3), tCol = new Float32Array(NN * 3), tNrm = new Float32Array(NN * 3), tIdx = new Uint32Array((N - 1) * (N - 1) * 6);
+for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const k = I(i, j); tPos[k * 3] = wx(i); tPos[k * 3 + 1] = H[k]; tPos[k * 3 + 2] = wx(j); }
+{ let p = 0; for (let j = 0; j < N - 1; j++) for (let i = 0; i < N - 1; i++) { const a = I(i, j), b = I(i, j + 1), c = I(i + 1, j), d = I(i + 1, j + 1); tIdx[p++] = a; tIdx[p++] = b; tIdx[p++] = c; tIdx[p++] = c; tIdx[p++] = b; tIdx[p++] = d; } }
+tGeo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
+tGeo.setAttribute('color', new THREE.BufferAttribute(tCol, 3));
+tGeo.setAttribute('normal', new THREE.BufferAttribute(tNrm, 3));
+tGeo.setIndex(new THREE.BufferAttribute(tIdx, 1));
+const terrain = new THREE.Mesh(tGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+scene.add(terrain);
+const water = new THREE.Mesh(new THREE.PlaneGeometry(SIZE, SIZE), new THREE.MeshLambertMaterial({ color: 0x3f6f8a, transparent: true, opacity: 0.78, depthWrite: false }));
+water.rotation.x = -Math.PI / 2; water.position.y = WATER_Y; scene.add(water);
+const base = new THREE.Mesh(new THREE.BoxGeometry(SIZE, 8, SIZE), new THREE.MeshLambertMaterial({ color: 0x5a4a36 }));
+base.position.y = -8; scene.add(base);
+let survey = false;
+function normalAt(i, j) {
+  const k = I(i, j);
+  const nx = (H[I(Math.max(i - 1, 0), j)] - H[I(Math.min(i + 1, N - 1), j)]) / (2 * CELL);
+  const nz = (H[I(i, Math.max(j - 1, 0))] - H[I(i, Math.min(j + 1, N - 1))]) / (2 * CELL);
+  const L = Math.hypot(nx, 1, nz);
+  tNrm[k * 3] = nx / L; tNrm[k * 3 + 1] = 1 / L; tNrm[k * 3 + 2] = nz / L;
+}
+function colorVertex(i, j) {
+  const k = I(i, j), h = H[k], v = (hash(i, j) - 0.5) * 0.05;
+  let c;
+  if (loose[k] > 0.05) c = looseKind[k] === 2 ? [0.46, 0.29, 0.17] : looseKind[k] === 3 ? [0.63, 0.61, 0.55] : [0.56, 0.46, 0.33];
+  else if (H0[k] < WATER_Y) c = [0.46, 0.43, 0.34];
+  else if (h < H0[k] - 0.15) {
+    if (h > PAYTOP[k] + 0.05) c = [0.43, 0.32, 0.21];
+    else if (h > BEDR[k] + 0.05) { const sp = hash(i * 3, j * 7) > 0.85 ? 0.08 : 0; c = [0.62 + sp, 0.46 + sp, 0.27]; }
+    else c = [0.33, 0.33, 0.37];
+  } else {
+    c = [0.44, 0.5, 0.26];
+    const nb = (a, b) => Math.abs(H[I(clamp(a, 0, N - 1), clamp(b, 0, N - 1))] - h) / CELL;
+    const st = smooth(0.6, 1.2, Math.max(nb(i + 1, j), nb(i - 1, j), nb(i, j + 1), nb(i, j - 1)));
+    c = [lerp(c[0], 0.45, st), lerp(c[1], 0.36, st), lerp(c[2], 0.24, st)];
+  }
+  if (survey && loose[k] <= 0.05 && h > BEDR[k] + 0.05) {
+    const t = clamp(GRADE[k] / 5, 0, 1);
+    const heat = t < 0.5 ? [lerp(0.25, 0.85, t * 2), lerp(0.3, 0.7, t * 2), lerp(0.55, 0.15, t * 2)] : [lerp(0.85, 1, (t - 0.5) * 2), lerp(0.7, 0.85, (t - 0.5) * 2), lerp(0.15, 0.25, (t - 0.5) * 2)];
+    c = [lerp(c[0], heat[0], 0.65), lerp(c[1], heat[1], 0.65), lerp(c[2], heat[2], 0.65)];
+  }
+  tCol[k * 3] = c[0] + v; tCol[k * 3 + 1] = c[1] + v; tCol[k * 3 + 2] = c[2] + v;
+}
+for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { colorVertex(i, j); normalAt(i, j); }
+tGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 160);
+let dirty = null;
+function markDirty(i0, j0, i1, j1) {
+  if (!dirty) dirty = [i0, j0, i1, j1];
+  else { dirty[0] = Math.min(dirty[0], i0); dirty[1] = Math.min(dirty[1], j0); dirty[2] = Math.max(dirty[2], i1); dirty[3] = Math.max(dirty[3], j1); }
+}
+function flushTerrain() {
+  if (!dirty) return;
+  const i0 = Math.max(0, dirty[0] - 1), j0 = Math.max(0, dirty[1] - 1), i1 = Math.min(N - 1, dirty[2] + 1), j1 = Math.min(N - 1, dirty[3] + 1);
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { tPos[I(i, j) * 3 + 1] = H[I(i, j)]; colorVertex(i, j); normalAt(i, j); }
+  tGeo.attributes.position.needsUpdate = true; tGeo.attributes.color.needsUpdate = true; tGeo.attributes.normal.needsUpdate = true;
+  dirty = null;
+}
+function cellBox(x, z, r) {
+  return [Math.max(1, Math.floor(gx(x - r))), Math.max(1, Math.floor(gx(z - r))), Math.min(N - 2, Math.ceil(gx(x + r))), Math.min(N - 2, Math.ceil(gx(z + r)))];
+}
+
+// --- moving earth: digging layer by layer, dumping, slumping piles
+function overlap(a0, a1, b0, b1) { return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0)); }
+function digAt(cx, cz, r, want) {
+  // Find the highest diggable spot inside the site and take a scoop around it, top down.
+  const [i0, j0, i1, j1] = cellBox(cx, cz, r);
+  let best = -1, bh = -1e9;
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    if (dist(wx(i), wx(j), cx, cz) > r) continue;
+    const k = I(i, j);
+    if (H[k] - BEDR[k] > 0.03 && H[k] > bh) { bh = H[k]; best = k; }
+  }
+  if (best < 0) return null;
+  const bx = wx(best % N), bz = wx((best / N) | 0);
+  let vol = 0, gold = 0, payVol = 0;
+  const [a0, b0, a1, b1] = cellBox(bx, bz, 1.8);
+  const cellA = CELL * CELL;
+  for (let pass = 0; pass < 6 && vol < want; pass++) {
+    for (let j = b0; j <= b1 && vol < want; j++) for (let i = a0; i <= a1 && vol < want; i++) {
+      const d = dist(wx(i), wx(j), bx, bz);
+      if (d > 1.8 || dist(wx(i), wx(j), cx, cz) > r + 0.6) continue;
+      const k = I(i, j);
+      const dh = Math.min(H[k] - BEDR[k], 0.12 * (1 - d / 2.2), (want - vol) / cellA);
+      if (dh <= 0.001) continue;
+      const top = H[k], bot = top - dh;
+      const lo = Math.min(loose[k], dh);
+      const ov = Math.max(0, overlap(bot, top - lo, PAYTOP[k], 1e9));
+      const py = overlap(bot, top - lo, BEDR[k], PAYTOP[k]);
+      const rich = overlap(bot, top - lo, BEDR[k], BEDR[k] + 0.5);
+      gold += (py * GRADE[k] + rich * GRADE[k] * 1.5 + ov * 0.03) * cellA;
+      payVol += py * cellA;
+      H[k] = bot; loose[k] = Math.max(0, loose[k] - dh);
+      vol += dh * cellA;
+    }
+  }
+  markDirty(a0, b0, a1, b1);
+  return { vol, gold, payVol };
+}
+function relax(x, z, R, iters) {
+  const [i0, j0, i1, j1] = cellBox(x, z, R), rep = T.repose * CELL;
+  for (let it = 0; it < iters; it++) {
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const k = I(i, j);
+      if (loose[k] < 0.002) continue;
+      for (const n of [k + 1, k - 1, k + N, k - N]) {
+        const diff = H[k] - H[n];
+        if (diff > rep) {
+          const mv = Math.min((diff - rep) * 0.5, loose[k]);
+          H[k] -= mv; loose[k] -= mv; H[n] += mv; loose[n] += mv; looseKind[n] = looseKind[k];
+        }
+      }
+    }
+  }
+  markDirty(i0, j0, i1, j1);
+}
+function deposit(x, z, vol, kind) {
+  const [i0, j0, i1, j1] = cellBox(x, z, 1.6);
+  let wsum = 0;
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) wsum += Math.max(0, 1 - dist(wx(i), wx(j), x, z) / 1.6);
+  if (wsum <= 0) return;
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const w = Math.max(0, 1 - dist(wx(i), wx(j), x, z) / 1.6);
+    if (!w) continue;
+    const k = I(i, j), dh = vol * w / wsum / (CELL * CELL);
+    H[k] += dh; loose[k] += dh; looseKind[k] = kind;
+  }
+  relax(x, z, 14, 8);
+}
+function takeLoose(x, z, vol, kind) {
+  let need = vol / (CELL * CELL), guard = 0;
+  const [i0, j0, i1, j1] = cellBox(x, z, 12);
+  while (need > 0.001 && guard++ < 400) {
+    let best = -1, bh = -1e9;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const k = I(i, j);
+      if (loose[k] > 0.01 && looseKind[k] === kind && H[k] > bh) { bh = H[k]; best = k; }
+    }
+    if (best < 0) break;
+    const tk = Math.min(0.15, loose[best], need);
+    H[best] -= tk; loose[best] -= tk; need -= tk;
+  }
+  markDirty(i0, j0, i1, j1);
+}
+function waterNear(x, z, r) {
+  const [i0, j0, i1, j1] = cellBox(x, z, r);
+  let n = 0;
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (H[I(i, j)] < WATER_Y - 0.15 && dist(wx(i), wx(j), x, z) <= r) n++;
+  return n;
+}
+
+// =============================================================== pathfinding (machines avoid steep pit walls and buildings)
+const blocked = new Uint8Array(NN);
+const gScore = new Float32Array(NN), came = new Int32Array(NN), stamp = new Uint32Array(NN), closed = new Uint32Array(NN);
+let curStamp = 0;
+const heapA = new Int32Array(NN * 4), heapF = new Float32Array(NN * 4);
+const DIRS = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2]];
+const cellOf = (x, z) => [clamp(Math.round(gx(x)), 0, N - 1), clamp(Math.round(gx(z)), 0, N - 1)];
+const wet = k => H[k] < WATER_Y - 0.25;
+function lineOK(ax, az, bx, bz, slope) {
+  const L = dist(ax, az, bx, bz), steps = Math.max(1, Math.ceil(L / (CELL * 0.5)));
+  let ph = hAt(ax, az);
+  const [si, sj] = cellOf(ax, az), sb = blocked[I(si, sj)];
+  for (let s = 1; s <= steps; s++) {
+    const t = s / steps, x = lerp(ax, bx, t), z = lerp(az, bz, t), h = hAt(x, z);
+    const [ci, cj] = cellOf(x, z), k = I(ci, cj);
+    if ((!sb && blocked[k]) || wet(k) || Math.abs(h - ph) / (L / steps) > slope * 1.08) return false;
+    ph = h;
+  }
+  return true;
+}
+function findPath(sx, sz, tx, tz, slope) {
+  curStamp++;
+  const [si, sj] = cellOf(sx, sz), [ti, tj] = cellOf(tx, tz);
+  const start = I(si, sj), goal = I(ti, tj);
+  const hfn = k => { const dx = Math.abs((k % N) - ti), dz = Math.abs(((k / N) | 0) - tj); return (dx + dz + (Math.SQRT2 - 2) * Math.min(dx, dz)) * CELL; };
+  let hs = 0;
+  const push = (k, f) => { let p = hs++; heapA[p] = k; heapF[p] = f; while (p > 0) { const q = (p - 1) >> 1; if (heapF[q] <= heapF[p]) break; [heapA[p], heapA[q]] = [heapA[q], heapA[p]]; [heapF[p], heapF[q]] = [heapF[q], heapF[p]]; p = q; } };
+  const pop = () => { const top = heapA[0]; hs--; if (hs > 0) { heapA[0] = heapA[hs]; heapF[0] = heapF[hs]; let p = 0; for (;;) { const l = p * 2 + 1, r = l + 1; let m = p; if (l < hs && heapF[l] < heapF[m]) m = l; if (r < hs && heapF[r] < heapF[m]) m = r; if (m === p) break; [heapA[p], heapA[m]] = [heapA[m], heapA[p]]; [heapF[p], heapF[m]] = [heapF[m], heapF[p]]; p = m; } } return top; };
+  stamp[start] = curStamp; gScore[start] = 0; came[start] = -1; push(start, hfn(start));
+  let best = start, bestH = hfn(start), iter = 0;
+  while (hs > 0 && iter++ < 60000) {
+    const k = pop();
+    if (closed[k] === curStamp) continue;
+    closed[k] = curStamp;
+    const hk = hfn(k);
+    if (hk < bestH) { bestH = hk; best = k; }
+    if (k === goal) break;
+    const ki = k % N, kj = (k / N) | 0;
+    for (const [di, dj, dd] of DIRS) {
+      const ni = ki + di, nj = kj + dj;
+      if (ni < 0 || nj < 0 || ni >= N || nj >= N) continue;
+      const n = I(ni, nj);
+      if (closed[n] === curStamp) continue;
+      if ((blocked[n] && !blocked[k] && n !== goal) || wet(n)) continue;
+      const step = dd * CELL, dh = Math.abs(H[n] - H[k]);
+      if (dh / step > slope) continue;
+      const g = gScore[k] + step * (1 + dh / step);
+      if (stamp[n] !== curStamp || g < gScore[n]) { stamp[n] = curStamp; gScore[n] = g; came[n] = k; push(n, g + hfn(n)); }
+    }
+  }
+  const raw = [];
+  for (let k = best; k !== -1; k = came[k]) raw.push([wx(k % N), wx((k / N) | 0)]);
+  raw.reverse();
+  if (best === goal) raw.push([tx, tz]);
+  const out = [];
+  let cur = [sx, sz], a = 0;
+  while (a < raw.length) { let b = raw.length - 1; while (b > a && !lineOK(cur[0], cur[1], raw[b][0], raw[b][1], slope)) b--; out.push(raw[b]); cur = raw[b]; a = b + 1; }
+  return { pts: out, reached: best === goal };
+}
+
+// =============================================================== models
+const M = c => new THREE.MeshLambertMaterial({ color: c });
+const MAT = { yel: M(0xd9a22a), dark: M(0x2a2b2e), steel: M(0x8a8f96), rubber: M(0x1c1c1e), wood: M(0x7a5634), roof: M(0x4a3b2e), gen: M(0x3d5a3c), rust: M(0x8a5a34), pump: M(0x2f6fa8), dirt: M(0x6a4a2c),
+  glass: new THREE.MeshLambertMaterial({ color: 0x9fc7d8, transparent: true, opacity: 0.55 }), sluice: new THREE.MeshBasicMaterial({ color: 0x6fb1d6 }) };
+const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+const cyl = (a, b, h, s = 12) => new THREE.CylinderGeometry(a, b, h, s);
+function add(g, geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); g.add(m); return m; }
+function makeExcavator() {
+  const g = new THREE.Group();
+  add(g, box(0.7, 0.8, 4.2), MAT.dark, 1.25, 0.4, 0); add(g, box(0.7, 0.8, 4.2), MAT.dark, -1.25, 0.4, 0);
+  const house = new THREE.Group(); house.position.y = 0.85; g.add(house);
+  add(house, box(2.6, 1.0, 3.0), MAT.yel, 0, 0.55, -0.2);
+  add(house, box(1.0, 1.3, 1.2), MAT.glass, -0.75, 1.6, 0.7);
+  add(house, box(2.6, 0.8, 0.7), MAT.dark, 0, 0.55, -1.85);
+  const boom = new THREE.Group(); boom.position.set(0.45, 1.1, 1.1); house.add(boom);
+  add(boom, box(0.36, 0.42, 4.6), MAT.yel, 0, 0, 2.3);
+  const stick = new THREE.Group(); stick.position.set(0, 0, 4.5); boom.add(stick);
+  add(stick, box(0.3, 0.3, 3.0), MAT.yel, 0, 0, 1.5);
+  const bucket = add(stick, box(1.0, 0.65, 0.75), MAT.dark, 0, -0.2, 3.1);
+  const load = add(stick, box(0.8, 0.3, 0.5), MAT.dirt, 0, 0.12, 3.1); load.visible = false;
+  g.userData = { house, boom, stick, bucket, load };
+  return g;
+}
+function makeLoader() {
+  const g = new THREE.Group();
+  add(g, box(1.8, 1.1, 2.7), MAT.yel, 0, 1.0, -0.2);
+  add(g, box(1.3, 1.0, 1.1), MAT.glass, 0, 2.0, -0.5);
+  for (const [x, z] of [[1.0, 0.8], [-1.0, 0.8], [1.0, -1.1], [-1.0, -1.1]]) add(g, cyl(0.55, 0.55, 0.45, 12), MAT.rubber, x, 0.55, z, 0, 0, Math.PI / 2);
+  const arms = new THREE.Group(); arms.position.set(0, 1.5, 0.7); g.add(arms);
+  add(arms, box(0.15, 0.18, 1.7), MAT.yel, 0.8, 0, 0.8); add(arms, box(0.15, 0.18, 1.7), MAT.yel, -0.8, 0, 0.8);
+  add(arms, box(2.1, 0.7, 0.75), MAT.dark, 0, -0.35, 1.75);
+  const load = add(arms, box(1.8, 0.35, 0.55), MAT.dirt, 0, 0.05, 1.75); load.visible = false;
+  g.userData = { arms, load };
+  return g;
+}
+function makePlant() {
+  const g = new THREE.Group();
+  add(g, box(6.5, 0.3, 11), MAT.dark, 0, 0.15, 0);
+  for (const [x, z] of [[2.2, 4], [-2.2, 4], [2.2, 1.5], [-2.2, 1.5]]) add(g, box(0.25, 3.3, 0.25), MAT.steel, x, 1.8, z);
+  add(g, new THREE.CylinderGeometry(2.4, 1.0, 2.2, 4), MAT.steel, 0, 4.4, 3.2, 0, Math.PI / 4, 0);
+  const trommel = add(g, cyl(1.0, 1.0, 5.2, 14), MAT.rust, 0, 2.6, 0, Math.PI / 2, 0, 0);
+  add(g, box(1.6, 0.3, 6), MAT.steel, 0, 1.4, -3.2, 0.13);
+  add(g, box(1.3, 0.06, 5.8), MAT.sluice, 0, 1.58, -3.2, 0.13);
+  add(g, box(0.8, 0.22, 6.2), MAT.dark, 0, 2.2, -7.2, -0.35);
+  g.userData = { trommel };
+  return g;
+}
+function makeGenerator() {
+  const g = new THREE.Group();
+  add(g, box(2.4, 2.4, 5.5), MAT.gen, 0, 1.2, 0);
+  add(g, cyl(0.16, 0.16, 1.6, 8), MAT.dark, 0.6, 3.0, -1.8);
+  return g;
+}
+function makePump() {
+  const g = new THREE.Group();
+  add(g, box(1.3, 0.9, 1.6), MAT.pump, 0, 0.45, 0);
+  add(g, box(0.8, 0.6, 0.8), MAT.dark, 0, 1.15, -0.2);
+  add(g, cyl(0.12, 0.12, 3, 8), MAT.rubber, 0, 0.3, 2.0, Math.PI / 2, 0, 0);
+  return g;
+}
+function makeBunkhouse() {
+  const g = new THREE.Group();
+  add(g, box(10, 3.2, 6), MAT.wood, 0, 1.6, 0);
+  add(g, box(10.6, 0.22, 3.6), MAT.roof, 0, 3.85, 1.55, 0.48);
+  add(g, box(10.6, 0.22, 3.6), MAT.roof, 0, 3.85, -1.55, -0.48);
+  add(g, box(1.6, 2.4, 0.2), MAT.dark, 0, 1.2, 3.05);
+  add(g, box(0.6, 1.8, 0.6), MAT.steel, 3.5, 4.6, -1);
+  return g;
+}
+
+// =============================================================== effects
+function radialTexture(stops) {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  for (const [o, col] of stops) gr.addColorStop(o, col);
+  x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+const smokeTex = radialTexture([[0, 'rgba(70,68,64,0.8)'], [0.6, 'rgba(80,78,74,0.3)'], [1, 'rgba(80,78,74,0)']]);
+const dustTex = radialTexture([[0, 'rgba(150,120,85,0.9)'], [0.6, 'rgba(140,112,80,0.35)'], [1, 'rgba(130,105,75,0)']]);
+const sparkTex = radialTexture([[0, 'rgba(255,240,170,1)'], [0.4, 'rgba(240,190,70,0.8)'], [1, 'rgba(230,170,40,0)']]);
+const puffs = [];
+function puff(tex, x, y, z, size, life, rise = 0.6, additive = false) {
+  let p = puffs.find(q => !q.alive && q.tex === tex);
+  if (!p) {
+    if (puffs.length > 200) return;
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending });
+    p = { sprite: new THREE.Sprite(mat), tex }; scene.add(p.sprite); puffs.push(p);
+  }
+  Object.assign(p, { alive: true, t: 0, life, size, rise });
+  p.sprite.visible = true; p.sprite.position.set(x, y, z); p.sprite.scale.setScalar(size * 0.5);
+}
+function updateEffects(dt) {
+  for (const p of puffs) {
+    if (!p.alive) continue;
+    p.t += dt;
+    const k = p.t / p.life;
+    if (k >= 1) { p.alive = false; p.sprite.visible = false; continue; }
+    p.sprite.position.y += p.rise * dt; p.sprite.scale.setScalar(p.size * (0.5 + k * 0.9)); p.sprite.material.opacity = 1 - k;
+  }
+}
+
+// =============================================================== claim state
+const machines = [], structures = [], piles = [];
+const ledger = { money: 25000, goldSafe: 0, goldWashed: 0, goldSold: 0, earned: 0, spent: 0, workers: 3, price: T.goldPrice, seasonT: 0, over: false };
+let simTime = 0, timeScale = 1, toolMode = null, sel = null, surveyBought = false, ID = 1;
+const KIND = { waste: 1, pay: 2, tail: 3 };
+class Pile {
+  constructor(kind, x, z) { this.id = ID++; this.kind = kind; this.code = KIND[kind]; this.x = x; this.z = z; this.vol = 0; this.gold = 0; piles.push(this); }
+  get grade() { return this.vol > 0.01 ? this.gold / this.vol : 0; }
+  add(v, g) { this.vol += v; this.gold += g; deposit(this.x + rand(-0.7, 0.7), this.z + rand(-0.7, 0.7), v, this.code); }
+  take(v) { v = Math.min(v, this.vol); const g = this.vol > 0 ? this.gold * v / this.vol : 0; this.vol -= v; this.gold -= g; takeLoose(this.x, this.z, v, this.code); return [v, g]; }
+}
+function pileAt(kind, x, z) { return piles.find(p => p.kind === kind && dist(p.x, p.z, x, z) < 4) || new Pile(kind, x, z); }
+const MTYPE = { excavator: { name: 'Excavator', speed: 1.8, slope: 0.55 }, loader: { name: 'Loader', speed: 5, slope: 0.6 } };
+class Machine {
+  constructor(type, x, z, heading = 0) {
+    this.id = ID++; this.type = type; this.M = MTYPE[type]; this.x = x; this.z = z; this.y = hAt(x, z); this.heading = heading;
+    this.path = null; this.pathI = 0; this.goal = null; this.order = null; this.state = 'Idle'; this.crewed = false; this.moving = false;
+    this.cargo = 0; this.cargoGold = 0; this.timer = 0; this.auto = type === 'loader'; this.swing = 0; this.boom = -0.3; this.stick = 0.4; this.bucketFull = false;
+    this.mesh = type === 'excavator' ? makeExcavator() : makeLoader();
+    this.mesh.traverse(o => { o.userData.ent = this; });
+    scene.add(this.mesh); machines.push(this);
+  }
+  get name() { return this.M.name + ' ' + (machines.filter(m => m.type === this.type).indexOf(this) + 1); }
+}
+const STYPE = { plant: { name: 'Wash Plant', r: 5.6 }, generator: { name: 'Generator', r: 3.2 }, pump: { name: 'Water Pump', r: 1.8 }, bunkhouse: { name: 'Bunkhouse', r: 5.8 } };
+class Structure {
+  constructor(kind, x, z, heading = 0) {
+    this.id = ID++; this.kind = kind; this.S = STYPE[kind]; this.x = x; this.z = z; this.heading = heading; this.y = hAt(x, z);
+    this.on = true; this.crewed = false; this.hopper = 0; this.hopperGold = 0; this.washed = 0; this.tailAcc = 0; this.goldAcc = 0; this.rate = 0; this.running = false;
+    this.mesh = { plant: makePlant, generator: makeGenerator, pump: makePump, bunkhouse: makeBunkhouse }[kind]();
+    this.mesh.position.set(x, this.y, z); this.mesh.rotation.y = heading;
+    this.mesh.traverse(o => { o.userData.ent = this; });
+    scene.add(this.mesh); structures.push(this); this.block(1);
+    if (kind === 'plant') this.tail = new Pile('tail', x - Math.sin(heading) * (this.S.r + 5), z - Math.cos(heading) * (this.S.r + 5));
+  }
+  block(v) {
+    const r = this.S.r + 0.4, [i0, j0, i1, j1] = cellBox(this.x, this.z, r);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (dist(wx(i), wx(j), this.x, this.z) <= r) blocked[I(i, j)] = Math.max(0, blocked[I(i, j)] + v);
+  }
+  get name() { const same = structures.filter(s => s.kind === this.kind); return this.S.name + (same.length > 1 ? ' ' + (same.indexOf(this) + 1) : ''); }
+  get inPt() { return [this.x + Math.sin(this.heading) * (this.S.r + 2.5), this.z + Math.cos(this.heading) * (this.S.r + 2.5)]; }
+}
+function beds() { return structures.filter(s => s.kind === 'bunkhouse').length * 4; }
+function setupClaim() {
+  new Structure('plant', 0, 30, Math.PI);
+  new Structure('generator', 13, 33, Math.PI);
+  new Structure('pump', -4, 59.5, 0);
+  new Structure('bunkhouse', -26, 24, Math.PI);
+  new Machine('excavator', 10, 8, Math.PI);
+  new Machine('loader', -6, 14, Math.PI);
+}
+
+// =============================================================== simulation
+function waterSupply() { return structures.filter(s => s.kind === 'pump' && s.on && s.wetOK).length * 60; }
+function power() { return structures.filter(s => s.kind === 'generator' && s.on).length * 60; }
+function assignCrew() {
+  let w = ledger.workers;
+  for (const s of structures) s.crewed = false;
+  for (const m of machines) m.crewed = false;
+  for (const s of structures) if (s.kind === 'plant' && w > 0) { s.crewed = true; w--; }
+  for (const m of machines) if (m.type === 'excavator' && m.order && w > 0) { m.crewed = true; w--; }
+  for (const m of machines) if (m.type === 'loader' && (m.auto || m.order) && w > 0) { m.crewed = true; w--; }
+  for (const m of machines) if (!m.crewed && w > 0) { m.crewed = true; w--; }
+}
+function spend(v) { ledger.money -= v; ledger.spent += v; }
+function travel(m, gx2, gz2, dt) {
+  // Follows a path to (gx2, gz2); returns true on arrival.
+  if (!m.goal || dist(m.goal[0], m.goal[1], gx2, gz2) > 1.5 || !m.path) {
+    const p = findPath(m.x, m.z, gx2, gz2, m.M.slope);
+    m.path = p.pts; m.pathI = 0; m.goal = [gx2, gz2]; m.reach = p.reached;
+  }
+  const tp = m.path[m.pathI];
+  if (!tp) { m.moving = false; return true; }
+  const dx = tp[0] - m.x, dz = tp[1] - m.z, dd = Math.hypot(dx, dz);
+  let sp = m.M.speed * (m.cargo > 0 ? 0.85 : 1);
+  const grade = (hAt(m.x + dx / (dd || 1), m.z + dz / (dd || 1)) - hAt(m.x, m.z));
+  sp *= clamp(1 - 0.5 * grade, 0.45, 1.15);
+  const st = Math.min(dd, sp * dt);
+  if (dd > 0.01) { m.x += dx / dd * st; m.z += dz / dd * st; const want = Math.atan2(dx, dz); m.heading += (((want - m.heading) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI) * clamp(dt * 4, 0, 1); }
+  if (dd < 0.7) m.pathI++;
+  m.moving = true;
+  return false;
+}
+function updateExcavator(m, dt) {
+  const o = m.order;
+  m.moving = false;
+  if (!o) { m.state = m.crewed ? 'Idle' : 'Parked'; m.boom = lerp(m.boom, -0.3, dt * 2); return; }
+  if (o.k === 'move') { m.state = 'Driving'; if (travel(m, o.x, o.z, dt)) { m.order = null; m.goal = null; } spend(T.fuelExc * dt); return; }
+  if (!m.crewed) { m.state = 'Waiting for an operator'; return; }
+  if (!o.arrived) {
+    m.state = 'Driving to the dig site';
+    spend(T.fuelExc * dt * 0.6);
+    if (travel(m, o.sx, o.sz, dt)) {
+      o.arrived = true; m.goal = null;
+      if (dist(m.x, m.z, o.sx, o.sz) > 3) { m.order = null; toast('The excavator could not reach that spot. The ground is too steep or wet.', 3200); return; }
+      const a = Math.atan2(o.x - m.x, o.z - m.z), rx = Math.cos(a), rz = -Math.sin(a);
+      o.pay = pileAt('pay', m.x + rx * 6.5, m.z + rz * 6.5);
+      o.waste = pileAt('waste', m.x - rx * 6.5, m.z - rz * 6.5);
+      m.heading = a;
+    }
+    return;
+  }
+  spend(T.fuelExc * dt);
+  const cycle = Math.max(1.2, T.bucket / T.digRate);
+  m.timer += dt;
+  const ph = (m.timer % cycle) / cycle;
+  const toPit = Math.atan2(o.x - m.x, o.z - m.z) - m.heading;
+  const toPile = m.bucketFull ? Math.atan2((m.bucketGrade >= T.cutoff ? o.pay : o.waste).x - m.x, (m.bucketGrade >= T.cutoff ? o.pay : o.waste).z - m.z) - m.heading : toPit;
+  if (ph < 0.35) { m.swing = lerp(m.swing, toPit, dt * 4); m.boom = lerp(m.boom, 0.35, dt * 3); m.stick = lerp(m.stick, 1.0, dt * 3); }
+  else if (ph < 0.45) {
+    if (!m.bucketFull) {
+      const b = digAt(o.x, o.z, o.r, T.bucket);
+      if (!b || b.vol < 0.02) { m.order = null; toast(`${m.name} reached bedrock everywhere in that dig site.`, 3200); return; }
+      m.bucketFull = true; m.bucketVol = b.vol; m.bucketGold = b.gold; m.bucketGrade = b.gold / Math.max(0.01, b.vol);
+      sfx('dig', o.x, o.z);
+      puff(dustTex, o.x + rand(-1, 1), hAt(o.x, o.z) + 0.6, o.z + rand(-1, 1), 3, 1.4, 0.6);
+    }
+    m.boom = lerp(m.boom, -0.45, dt * 4); m.stick = lerp(m.stick, 0.3, dt * 4);
+  } else if (ph < 0.8) { m.swing = lerp(m.swing, toPile, dt * 3.5); m.boom = lerp(m.boom, -0.4, dt * 3); }
+  else if (m.bucketFull) {
+    const p = m.bucketGrade >= T.cutoff ? o.pay : o.waste;
+    p.add(m.bucketVol, m.bucketGold);
+    m.bucketFull = false;
+    sfx('dump', p.x, p.z);
+    puff(dustTex, p.x, hAt(p.x, p.z) + 1, p.z, 3.5, 1.6, 0.8);
+  }
+  m.state = m.bucketFull ? (m.bucketGrade >= T.cutoff ? `Pay dirt, ${m.bucketGrade.toFixed(1)} g/m³` : 'Overburden to waste') : 'Digging';
+}
+function updateLoader(m, dt) {
+  const o = m.order;
+  if (o && o.k === 'move') { m.state = 'Driving'; spend(T.fuelLoader * dt); if (travel(m, o.x, o.z, dt)) { m.order = null; m.goal = null; } return; }
+  if (!m.auto) { m.moving = false; m.state = 'Parked'; return; }
+  if (!m.crewed) { m.moving = false; m.state = 'Waiting for an operator'; return; }
+  spend(T.fuelLoader * dt);
+  m.job = m.job || { s: 'seek' };
+  const j = m.job;
+  if (j.s === 'seek') {
+    m.moving = false;
+    const plants = structures.filter(s => s.kind === 'plant' && s.hopper < T.hopperCap - 0.5);
+    const cands = piles.filter(p => p.kind === 'pay' && p.vol >= 0.5 && (!m.only || p === m.only));
+    if (!plants.length || !cands.length) { m.state = !cands.length ? 'No pay dirt to haul' : 'Wash plant hopper full'; return; }
+    cands.sort((a, b) => (b.vol - dist(b.x, b.z, m.x, m.z) * 0.05) - (a.vol - dist(a.x, a.z, m.x, m.z) * 0.05));
+    j.pile = cands[0]; j.plant = plants.sort((a, b) => a.hopper - b.hopper)[0]; j.s = 'toPile'; m.goal = null;
+  }
+  if (j.s === 'toPile') {
+    m.state = 'Heading to the pay dirt';
+    const a = Math.atan2(m.x - j.pile.x, m.z - j.pile.z), tx = j.pile.x + Math.sin(a) * 3.2, tz = j.pile.z + Math.cos(a) * 3.2;
+    if (travel(m, tx, tz, dt)) { j.s = 'load'; m.timer = 0; m.goal = null; m.heading = Math.atan2(j.pile.x - m.x, j.pile.z - m.z); }
+  } else if (j.s === 'load') {
+    m.moving = false; m.state = 'Loading'; m.timer += dt;
+    if (m.timer > 2.5) { const [v, g] = j.pile.take(T.loaderCap); m.cargo = v; m.cargoGold = g; sfx('dump', j.pile.x, j.pile.z); j.s = v > 0.05 ? 'toPlant' : 'seek'; m.goal = null; }
+  } else if (j.s === 'toPlant') {
+    m.state = `Hauling ${m.cargo.toFixed(1)} m³`;
+    const [tx, tz] = j.plant.inPt;
+    if (travel(m, tx, tz, dt)) { j.s = 'dump'; m.timer = 0; m.goal = null; m.heading = Math.atan2(j.plant.x - m.x, j.plant.z - m.z); }
+  } else if (j.s === 'dump') {
+    m.moving = false; m.state = 'Feeding the hopper'; m.timer += dt;
+    if (m.timer > 2) { j.plant.hopper += m.cargo; j.plant.hopperGold += m.cargoGold; m.cargo = 0; m.cargoGold = 0; sfx('dump', j.plant.x, j.plant.z); j.s = 'seek'; }
+  }
+}
+function updateStructures(dt) {
+  const plants = structures.filter(s => s.kind === 'plant');
+  const running = plants.filter(s => s.on && s.crewed && s.hopper > 0.01);
+  const pw = power(), wt = waterSupply();
+  const pf = running.length ? Math.min(1, pw / (running.length * 40)) : 0;
+  const wf = running.length ? Math.min(1, wt / (running.length * 100)) : 0;
+  for (const s of plants) {
+    s.running = running.includes(s) && pf > 0 && wf > 0;
+    s.rate = s.running ? T.washRate * pf * wf : 0;
+    s.pf = pf; s.wf = wf;
+    if (!s.running) continue;
+    const v = Math.min(s.hopper, s.rate * dt), g = s.hopper > 0 ? s.hopperGold * v / s.hopper : 0;
+    s.hopper -= v; s.hopperGold -= g;
+    const won = g * T.recovery;
+    ledger.goldSafe += won; ledger.goldWashed += won; s.washed += v; s.goldAcc += won;
+    s.tailAcc += v * 0.92;
+    if (s.tailAcc > 0.4) { s.tail.add(s.tailAcc, g - won); s.tailAcc = 0; }
+    if (s.goldAcc >= 1) { s.goldAcc -= 1; sfx('ding', s.x, s.z); puff(sparkTex, s.x, s.y + 2, s.z, 1.6, 0.7, 1.2, true); }
+  }
+  for (const s of structures) {
+    if (s.kind === 'generator' && s.on) { spend(T.fuelGen * dt * (running.length ? 1 : 0.35)); if (Math.random() < dt * 3) puff(smokeTex, s.x + 0.6, s.y + 3.8, s.z - 1.8, 1.6, 2.4, 1.4); }
+    if (s.kind === 'pump' && s.on) spend(T.fuelPump * dt);
+  }
+}
+function updateLedger(dt) {
+  spend(T.wage * ledger.workers * dt);
+  ledger.priceT = (ledger.priceT || 0) + dt;
+  if (ledger.priceT > 8) { ledger.priceT = 0; ledger.price = clamp(ledger.price * (1 + rand(-0.025, 0.026)), T.goldPrice * 0.6, T.goldPrice * 1.6); }
+  ledger.seasonT += dt;
+  if (!ledger.over && ledger.seasonT >= T.seasonMin * 60) { ledger.over = true; setSpeed(0); drawer = 'season'; renderDrawer(); sfx('cash', cam.x, cam.z); }
+}
+function sellGold() {
+  if (ledger.goldSafe < 0.01) return toast('The safe is empty. Wash some pay dirt first.', 2200);
+  const v = ledger.goldSafe * ledger.price;
+  ledger.money += v; ledger.earned += v; ledger.goldSold += ledger.goldSafe; ledger.goldSafe = 0;
+  sfx('cash', cam.x, cam.z); toast(`Sold gold for ${money(v)}.`, 2400); refreshCmd();
+}
+function step(dt) {
+  simTime += dt;
+  assignCrew();
+  for (const m of machines) { if (m.type === 'excavator') updateExcavator(m, dt); else updateLoader(m, dt); m.y = hAt(m.x, m.z); }
+  updateStructures(dt);
+  updateLedger(dt);
+}
+
+// =============================================================== camera + input (isometric)
+const cam = { x: -2, z: 22, yaw: Math.PI * 1.25, pitch: 0.66, size: window.innerWidth < 640 ? 46 : 38 };
+function placeCamera() {
+  cam.x = clamp(cam.x, -HALF, HALF); cam.z = clamp(cam.z, -HALF, HALF); cam.size = clamp(cam.size, 10, 110);
+  const ty = Math.max(0, hAt(cam.x, cam.z)), d = 400;
+  camera.position.set(cam.x + Math.sin(cam.yaw) * Math.cos(cam.pitch) * d, ty + Math.sin(cam.pitch) * d, cam.z + Math.cos(cam.yaw) * Math.cos(cam.pitch) * d);
+  camera.lookAt(cam.x, ty, cam.z);
+  const w = glCanvas.clientWidth || 1, h = glCanvas.clientHeight || 1, asp = w / h;
+  camera.left = -cam.size * asp; camera.right = cam.size * asp; camera.top = cam.size; camera.bottom = -cam.size;
+  camera.updateProjectionMatrix();
+}
+function panBy(dxPx, dyPx) {
+  const wpp = 2 * cam.size / (glCanvas.clientHeight || 1);
+  const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw), fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw);
+  cam.x -= rx * dxPx * wpp; cam.z -= rz * dxPx * wpp;
+  cam.x += fx * dyPx * wpp / Math.sin(cam.pitch); cam.z += fz * dyPx * wpp / Math.sin(cam.pitch);
+}
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), tmpV = new THREE.Vector3();
+function setRay(cx, cy) { const r = glCanvas.getBoundingClientRect(); ndc.set((cx - r.left) / r.width * 2 - 1, -((cy - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, camera); }
+function groundAt(cx, cy) { setRay(cx, cy); const hit = ray.intersectObject(terrain, false)[0]; return hit ? [hit.point.x, hit.point.z] : null; }
+function toScreen(x, y, z) { tmpV.set(x, y, z).project(camera); if (tmpV.z > 1 || tmpV.z < -1) return null; return [(tmpV.x + 1) / 2 * glCanvas.clientWidth, (1 - tmpV.y) / 2 * glCanvas.clientHeight]; }
+function pickEntity(cx, cy) {
+  setRay(cx, cy);
+  const hit = ray.intersectObjects([...machines.map(m => m.mesh), ...structures.map(s => s.mesh)], true)[0];
+  if (hit) return hit.object.userData.ent;
+  const r = glCanvas.getBoundingClientRect(), px = cx - r.left, py = cy - r.top;
+  let best = null, bd = 34;
+  for (const m of machines) { const s = toScreen(m.x, m.y + 1.5, m.z); if (s) { const d = Math.hypot(s[0] - px, s[1] - py); if (d < bd) { bd = d; best = m; } } }
+  for (const p of piles) { if (p.vol < 0.3) continue; const s = toScreen(p.x, hAt(p.x, p.z) + 0.5, p.z); if (s) { const d = Math.hypot(s[0] - px, s[1] - py); if (d < bd) { bd = d; best = p; } } }
+  return best;
+}
+function select(e) { sel = e; refreshCmd(); }
+const marks = [];
+function markAt(x, z, color) { marks.push({ x, z, color, t: 0 }); sfx('click', x, z); }
+function onTap(cx, cy, button) {
+  if (toolMode) { useTool(cx, cy); return; }
+  const e = pickEntity(cx, cy);
+  if (sel instanceof Machine && sel.type === 'loader' && e instanceof Pile && e.kind === 'pay') { sel.only = e; sel.auto = true; sel.order = null; sel.job = null; markAt(e.x, e.z, '#e3b448'); refreshCmd(); return; }
+  if (e && button !== 2) { select(e); return; }
+  if (sel instanceof Machine) {
+    const g = groundAt(cx, cy);
+    if (!g) return;
+    sel.order = { k: 'move', x: g[0], z: g[1] }; sel.goal = null; sel.job = null;
+    if (sel.type === 'loader') sel.auto = false;
+    markAt(g[0], g[1], '#efe5cf'); refreshCmd();
+    return;
+  }
+  select(null);
+}
+function siteProblem(kind, x, z) {
+  const r = STYPE[kind].r;
+  if (Math.abs(x) > HALF - r - 3 || Math.abs(z) > HALF - r - 3) return 'Too close to the edge of the claim.';
+  for (const s of structures) if (dist(s.x, s.z, x, z) < r + s.S.r + 1.5) return 'Too close to another building.';
+  let lo = 1e9, hi = -1e9;
+  for (let a = 0; a < 8; a++) for (const rr of [0, r * 0.6, r]) { const h = hAt(x + Math.cos(a * Math.PI / 4) * rr, z + Math.sin(a * Math.PI / 4) * rr); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+  if (hi - lo > 2.2) return 'The ground there is too uneven.';
+  if (hAt(x, z) < WATER_Y) return 'That spot is under water.';
+  if (kind === 'pump' && !waterNear(x, z, 9)) return 'A pump needs water within 9 m.';
+  return null;
+}
+function useTool(cx, cy) {
+  const g = groundAt(cx, cy);
+  if (!g) return;
+  if (toolMode === 'dig' && sel instanceof Machine) {
+    const a = Math.atan2(sel.x - g[0], sel.z - g[1]), r = T.siteRadius;
+    sel.order = { k: 'dig', x: g[0], z: g[1], r, sx: g[0] + Math.sin(a) * (r + 3.2), sz: g[1] + Math.cos(a) * (r + 3.2) };
+    sel.goal = null; sel.bucketFull = false; sel.timer = 0;
+    markAt(g[0], g[1], '#e3b448'); setTool(null); refreshCmd();
+    return;
+  }
+  if (toolMode && toolMode.startsWith('build:')) {
+    const kind = toolMode.split(':')[1], why = siteProblem(kind, g[0], g[1]);
+    if (why) { toastPersist(why + ' Tap somewhere else.'); return; }
+    if (ledger.money < PRICES[kind]) { setTool(null); toast(`Not enough money: ${STYPE[kind].name} costs ${money(PRICES[kind])}.`, 2600); return; }
+    spend(PRICES[kind]);
+    const s = new Structure(kind, g[0], g[1], Math.round(Math.atan2(cam.x - g[0], cam.z - g[1]) / (Math.PI / 2)) * (Math.PI / 2));
+    if (kind === 'pump') s.wetOK = true;
+    markAt(g[0], g[1], '#e3b448'); setTool(null); select(s);
+  }
+}
+const TOOL_TEXT = { dig: 'Tap the ground where the excavator should dig.', build: () => `Tap open, level ground for the ${STYPE[toolMode.split(':')[1]].name}.` };
+function setTool(t) {
+  toolMode = t;
+  if (t) { const tx = TOOL_TEXT[t] || TOOL_TEXT[t.split(':')[0]]; toastPersist(typeof tx === 'function' ? tx() : tx); } else hideToast();
+}
+const ptrs = new Map();
+let pinch = null, mouse = [0, 0];
+glCanvas.addEventListener('contextmenu', e => e.preventDefault());
+glCanvas.addEventListener('pointerdown', e => {
+  glCanvas.setPointerCapture(e.pointerId);
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, type: e.pointerType, btn: e.button, moved: false });
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), ang: Math.atan2(b.y - a.y, b.x - a.x), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 }; for (const p of ptrs.values()) p.moved = true; }
+});
+glCanvas.addEventListener('pointermove', e => {
+  mouse = [e.clientX, e.clientY];
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y;
+  p.x = e.clientX; p.y = e.clientY;
+  if (ptrs.size >= 2 && pinch) {
+    const [a, b] = [...ptrs.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y), ang = Math.atan2(b.y - a.y, b.x - a.x), cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+    cam.size *= pinch.d / Math.max(1, d); cam.yaw -= ang - pinch.ang; panBy(cx - pinch.cx, cy - pinch.cy);
+    pinch = { d, ang, cx, cy };
+    return;
+  }
+  if (!p.moved && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 7) p.moved = true;
+  if (!p.moved) return;
+  if (p.type === 'mouse' && p.btn === 1) cam.yaw -= dx * 0.006; else panBy(dx, dy);
+});
+function endPtr(e) {
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  ptrs.delete(e.pointerId);
+  if (ptrs.size < 2 && !ptrs.size) pinch = null;
+  if (!p.moved && e.type === 'pointerup' && ptrs.size === 0) onTap(e.clientX, e.clientY, p.btn);
+}
+glCanvas.addEventListener('pointerup', endPtr);
+glCanvas.addEventListener('pointercancel', endPtr);
+glCanvas.addEventListener('wheel', e => { e.preventDefault(); cam.size *= Math.exp(e.deltaY * 0.0012); }, { passive: false });
+const keys = new Set();
+window.addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input, select, textarea')) return;
+  keys.add(e.key.toLowerCase());
+  if (e.key === ' ') { e.preventDefault(); setSpeed(timeScale ? 0 : 1); }
+  if (e.key === 'Escape') { if (toolMode) setTool(null); else select(null); }
+});
+window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+function keyPan(dt) {
+  const s = 600 * dt;
+  if (keys.has('w') || keys.has('arrowup')) panBy(0, s);
+  if (keys.has('s') || keys.has('arrowdown')) panBy(0, -s);
+  if (keys.has('d') || keys.has('arrowright')) panBy(-s, 0);
+  if (keys.has('a') || keys.has('arrowleft')) panBy(s, 0);
+  if (keys.has('q')) cam.yaw += dt * 1.4;
+  if (keys.has('e')) cam.yaw -= dt * 1.4;
+}
+
+// =============================================================== HUD overlay
+function badge(c, x, y, text, sub, stripe, selected, fill) {
+  c.font = '600 12px "Barlow Condensed", "Arial Narrow", sans-serif';
+  const w = Math.max(c.measureText(text).width, sub ? c.measureText(sub).width : 0) + 16, h = sub ? 30 : 17, bx = x - w / 2, by = y - h;
+  c.fillStyle = selected ? 'rgba(52,40,14,0.95)' : 'rgba(22,19,14,0.8)'; c.fillRect(bx, by, w, h);
+  c.fillStyle = stripe; c.fillRect(bx, by, 4, h);
+  c.strokeStyle = selected ? '#e3b448' : 'rgba(255,255,255,0.12)'; c.lineWidth = selected ? 1.5 : 1; c.strokeRect(bx + 0.5, by + 0.5, w - 1, h - 1);
+  c.fillStyle = '#efe5cf'; c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillText(text, bx + 9, by + 9);
+  if (sub) { c.fillStyle = '#a99b80'; c.fillText(sub, bx + 9, by + 22); }
+  if (fill != null) { c.fillStyle = 'rgba(0,0,0,0.6)'; c.fillRect(bx, by + h, w, 4); c.fillStyle = '#e3b448'; c.fillRect(bx, by + h, w * clamp(fill, 0, 1), 4); }
+}
+function drawHUD() {
+  const w = hud.clientWidth, h = hud.clientHeight, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (hud.width !== Math.round(w * dpr) || hud.height !== Math.round(h * dpr)) { hud.width = Math.round(w * dpr); hud.height = Math.round(h * dpr); }
+  const c = hctx;
+  c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h);
+  const ring = (x, z, r, color) => {
+    c.beginPath(); let first = true;
+    for (let a = 0; a <= 32; a++) { const t = a / 32 * Math.PI * 2, px = x + Math.cos(t) * r, pz = z + Math.sin(t) * r, s = toScreen(px, hAt(px, pz) + 0.15, pz); if (!s) { first = true; continue; } if (first) { c.moveTo(s[0], s[1]); first = false; } else c.lineTo(s[0], s[1]); }
+    c.setLineDash([5, 4]); c.strokeStyle = color; c.lineWidth = 1.5; c.stroke(); c.setLineDash([]);
+  };
+  for (const m of machines) if (m.order && m.order.k === 'dig') ring(m.order.x, m.order.z, m.order.r, sel === m ? 'rgba(227,180,72,0.95)' : 'rgba(227,180,72,0.5)');
+  if (sel instanceof Structure) ring(sel.x, sel.z, sel.S.r + 1, 'rgba(227,180,72,0.9)');
+  if (sel instanceof Machine) ring(sel.x, sel.z, 3, 'rgba(227,180,72,0.9)');
+  if (sel instanceof Pile) ring(sel.x, sel.z, 3.5, 'rgba(227,180,72,0.9)');
+  for (let n = marks.length - 1; n >= 0; n--) {
+    const mk = marks[n]; mk.t += 1 / 60;
+    if (mk.t > 0.8) { marks.splice(n, 1); continue; }
+    const s = toScreen(mk.x, hAt(mk.x, mk.z) + 0.2, mk.z);
+    if (s) { c.strokeStyle = mk.color; c.globalAlpha = 1 - mk.t / 0.8; c.lineWidth = 2; c.beginPath(); c.arc(s[0], s[1], 6 + mk.t * 22, 0, 7); c.stroke(); c.globalAlpha = 1; }
+  }
+  for (const p of piles) {
+    if (p.vol < 0.3) continue;
+    const s = toScreen(p.x, hAt(p.x, p.z) + 1.2, p.z);
+    if (!s) continue;
+    const label = p.kind === 'pay' ? `Pay dirt ${p.vol.toFixed(0)} m³` : p.kind === 'waste' ? `Waste ${p.vol.toFixed(0)} m³` : `Tailings ${p.vol.toFixed(0)} m³`;
+    badge(c, s[0], s[1], label, p.kind === 'pay' ? `${p.grade.toFixed(2)} g/m³ · ~${(p.gold * T.recovery).toFixed(0)} g` : null, p.kind === 'pay' ? '#c4762f' : p.kind === 'waste' ? '#8d7656' : '#a8a296', sel === p);
+  }
+  for (const s0 of structures) {
+    const s = toScreen(s0.x, s0.y + (s0.kind === 'plant' ? 6.5 : s0.kind === 'bunkhouse' ? 5.5 : 3.5), s0.z);
+    if (!s) continue;
+    let sub = null, fill = null, stripe = '#8a8f96';
+    if (s0.kind === 'plant') {
+      sub = !s0.crewed ? 'No operator' : s0.hopper < 0.05 ? 'Hopper empty' : s0.running ? `Washing ${(s0.rate * 60).toFixed(1)} m³/min` : (s0.pf <= 0 ? 'No power' : 'No water');
+      fill = s0.hopper / T.hopperCap; stripe = s0.running ? '#8db36a' : '#d4574a';
+    } else if (s0.kind === 'pump') { sub = s0.on ? '60 water' : 'Off'; stripe = s0.on ? '#6fb1d6' : '#555'; }
+    else if (s0.kind === 'generator') { sub = s0.on ? '60 kW' : 'Off'; stripe = s0.on ? '#8db36a' : '#555'; }
+    else { sub = `${ledger.workers}/${beds()} beds used`; }
+    badge(c, s[0], s[1], s0.name, sub, stripe, sel === s0, fill);
+  }
+  for (const m of machines) {
+    const s = toScreen(m.x, m.y + 3.6, m.z);
+    if (!s) continue;
+    badge(c, s[0], s[1], m.name, m.state, m.crewed ? '#e3b448' : '#d4574a', sel === m);
+  }
+}
+
+// =============================================================== UI
+let toastTimer = 0;
+function toast(text, ms) { if (toolMode) return; $('#toastText').textContent = text; $('#toastCancel').hidden = true; $('#toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, ms || 2000); }
+function toastPersist(text) { clearTimeout(toastTimer); $('#toastText').textContent = text; $('#toastCancel').hidden = false; $('#toast').hidden = false; }
+function hideToast() { $('#toast').hidden = true; }
+$('#toastCancel').addEventListener('click', () => setTool(null));
+function setSpeed(s) { timeScale = s; for (const b of document.querySelectorAll('#speedSeg button')) b.classList.toggle('on', +b.dataset.speed === s); }
+for (const b of document.querySelectorAll('#speedSeg button')) b.addEventListener('click', () => setSpeed(+b.dataset.speed));
+function btn(label, fn, cls) { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.addEventListener('click', fn); return b; }
+function renderStats() {
+  const left = Math.max(0, T.seasonMin * 60 - ledger.seasonT), mm = Math.floor(left / 60), ss = String(Math.floor(left % 60)).padStart(2, '0');
+  $('#stats').innerHTML = `<span class="${ledger.money < 0 ? 'neg' : ''}"><b>${money(ledger.money)}</b></span><span>Safe <b>${ledger.goldSafe.toFixed(1)} g</b></span><span>Gold <b>$${ledger.price.toFixed(0)}/g</b></span><span>Crew <b>${ledger.workers}/${beds()}</b></span><span>Season <b>${mm}:${ss}</b></span>`;
+}
+function refreshCmd() {
+  const info = $('#selInfo'), cmds = $('#cmds');
+  cmds.textContent = '';
+  const goldBtn = btn(`Sell gold ${ledger.goldSafe.toFixed(1)} g`, sellGold, 'goldbtn');
+  if (!sel) {
+    const pw = power(), wt = waterSupply(), demandW = structures.filter(s => s.kind === 'plant').length * 100;
+    info.innerHTML = `<b>Your claim.</b> <span class="st">Power ${pw} kW · water ${wt}/${demandW} · tap a machine, building or pile. Gold sits in the buried riverbed, richest right on bedrock.</span>`;
+    cmds.append(goldBtn, btn('Excavator', () => select(machines.find(m => m.type === 'excavator'))), btn('Wash plant', () => select(structures.find(s => s.kind === 'plant'))));
+    return;
+  }
+  if (sel instanceof Machine) {
+    const m = sel;
+    info.innerHTML = `<b>${m.name}</b> · ${m.crewed ? 'operator on board' : 'no operator, hire more crew'}<br><span class="st">${m.state}${m.type === 'loader' && m.only ? ' · hauling from one chosen pile' : ''}</span>`;
+    if (m.type === 'excavator') cmds.append(btn('Dig here', () => setTool('dig')), btn('Stop', () => { m.order = null; refreshCmd(); }));
+    else cmds.append(btn(m.auto ? 'Auto-haul: on' : 'Auto-haul: off', () => { m.auto = !m.auto; m.order = null; m.job = null; m.only = null; refreshCmd(); }, m.auto ? 'on' : ''), btn('Haul from any pile', () => { m.only = null; m.auto = true; m.order = null; m.job = null; refreshCmd(); }));
+    cmds.append(btn('Deselect', () => select(null)));
+    if (m.type === 'loader') info.innerHTML += '<br><span class="st">Tip: tap a pay dirt pile to haul from just that pile.</span>';
+    return;
+  }
+  if (sel instanceof Pile) {
+    const p = sel;
+    info.innerHTML = `<b>${p.kind === 'pay' ? 'Pay dirt pile' : p.kind === 'waste' ? 'Waste pile' : 'Tailings'}</b> · ${p.vol.toFixed(1)} m³<br><span class="st">${p.kind === 'pay' ? `${p.grade.toFixed(2)} g/m³ · about ${(p.gold * T.recovery).toFixed(1)} g recoverable` : p.kind === 'waste' ? 'Overburden with almost no gold. Dirt for ramps and berms later.' : 'Washed gravel from the plant. A little gold slips past every sluice.'}</span>`;
+    cmds.append(btn('Deselect', () => select(null)));
+    return;
+  }
+  const s = sel;
+  if (s.kind === 'plant') {
+    const st = !s.crewed ? 'No operator. Hire more crew.' : s.hopper < 0.05 ? 'Waiting for pay dirt. Loaders feed the hopper.' : s.running ? `Washing ${(s.rate * 60).toFixed(1)} m³ per minute${s.wf < 1 ? `, slowed by water (${Math.round(s.wf * 100)}%)` : ''}${s.pf < 1 ? `, slowed by power (${Math.round(s.pf * 100)}%)` : ''}.` : s.pf <= 0 ? 'No power. Turn on a generator.' : 'No water. Place a pump at the creek.';
+    info.innerHTML = `<b>${s.name}</b> · hopper ${s.hopper.toFixed(1)}/${T.hopperCap} m³ · washed ${s.washed.toFixed(0)} m³<br><span class="st">${st}</span>`;
+    cmds.append(goldBtn, btn(s.on ? 'Shut down' : 'Start up', () => { s.on = !s.on; refreshCmd(); }));
+  } else if (s.kind === 'generator' || s.kind === 'pump') {
+    info.innerHTML = `<b>${s.name}</b> · ${s.on ? 'running' : 'off'}<br><span class="st">${s.kind === 'pump' ? 'Pumps 60 units of creek water. Each wash plant needs 100.' : 'Makes 60 kW. Each running wash plant needs 40 kW.'} Burns diesel while on.</span>`;
+    cmds.append(btn(s.on ? 'Turn off' : 'Turn on', () => { s.on = !s.on; refreshCmd(); }));
+  } else {
+    info.innerHTML = `<b>${s.name}</b> · ${ledger.workers}/${beds()} beds used<br><span class="st">Every machine and wash plant needs one crew member. Wages are ${money(T.wage * 60)} per worker per minute.</span>`;
+    cmds.append(btn(`Hire worker ${money(PRICES.hire)}`, hireWorker), btn('Let one go', fireWorker));
+  }
+  cmds.append(btn('Deselect', () => select(null)));
+}
+function hireWorker() {
+  if (ledger.workers >= beds()) return toast('No free beds. Build another bunkhouse first.', 2400);
+  if (ledger.money < PRICES.hire) return toast('Not enough money to hire.', 2000);
+  spend(PRICES.hire); ledger.workers++; sfx('click', cam.x, cam.z); refreshCmd(); if (drawer === 'crew') renderDrawer();
+}
+function fireWorker() { if (ledger.workers > 0) ledger.workers--; refreshCmd(); if (drawer === 'crew') renderDrawer(); }
+
+let drawer = null;
+for (const b of document.querySelectorAll('[data-drawer]')) b.addEventListener('click', () => { drawer = drawer === b.dataset.drawer ? null : b.dataset.drawer; renderDrawer(); });
+$('#drawerClose').addEventListener('click', () => { drawer = null; renderDrawer(); });
+$('#surveyBtn').addEventListener('click', () => {
+  if (!surveyBought) {
+    if (ledger.money < PRICES.survey) return toast('A geologist costs ' + money(PRICES.survey) + '.', 2400);
+    spend(PRICES.survey); surveyBought = true; toast('The geologist mapped the gold. Gold-colored ground is richest.', 3200);
+  }
+  survey = !survey;
+  $('#surveyBtn').classList.toggle('on', survey);
+  $('#surveyBtn').textContent = survey ? 'Survey: on' : 'Survey';
+  markDirtyAll();
+});
+function markDirtyAll() { markDirty(0, 0, N - 1, N - 1); }
+function sliderRow(key, label, min, max, step) {
+  const wrap = document.createElement('div'); wrap.className = 'slider';
+  const id = 't_' + key;
+  const lab = document.createElement('label'); lab.htmlFor = id; lab.textContent = label;
+  const out = document.createElement('output'); out.htmlFor = id;
+  const fmt = v => step >= 1 ? String(Math.round(v)) : (+v).toFixed(step < 0.1 ? 2 : 1);
+  const mark = () => wrap.classList.toggle('changed', Math.abs(T[key] - DEFAULT_T[key]) > 1e-9);
+  out.textContent = fmt(T[key]); mark();
+  const inp = document.createElement('input'); inp.type = 'range'; inp.id = id; inp.min = min; inp.max = max; inp.step = step; inp.value = T[key];
+  inp.addEventListener('input', () => { T[key] = +inp.value; out.textContent = fmt(T[key]); mark(); saveTune(); });
+  wrap.append(lab, out, inp);
+  return wrap;
+}
+function shopItem(name, price, desc, onBuy) {
+  const d = document.createElement('div'); d.className = 'shopitem';
+  const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = name;
+  const ds = document.createElement('div'); ds.className = 'ds'; ds.textContent = desc;
+  const b = btn(money(price), onBuy);
+  if (ledger.money < price) b.classList.add('dim');
+  d.append(nm, b, ds);
+  return d;
+}
+function deliver(type) {
+  if (ledger.money < PRICES[type]) return toast(`Not enough money: costs ${money(PRICES[type])}.`, 2400);
+  spend(PRICES[type]);
+  const m = new Machine(type, rand(-6, 6), -40, 0);
+  m.order = { k: 'move', x: rand(-8, 8), z: rand(-4, 6) };
+  toast(`${m.name} delivered at the south road.`, 2600); select(m);
+}
+function renderDrawer() {
+  const d = $('#drawer'), body = $('#drawerBody');
+  for (const b of document.querySelectorAll('[data-drawer]')) b.classList.toggle('on', b.dataset.drawer === drawer);
+  d.hidden = !drawer;
+  if (!drawer) return;
+  body.textContent = '';
+  const h3 = t => { const e = document.createElement('h3'); e.textContent = t; return e; };
+  const p = t => { const e = document.createElement('p'); e.textContent = t; return e; };
+  if (drawer === 'shop') {
+    $('#drawerTitle').textContent = 'Equipment dealer';
+    body.append(p(`You have ${money(ledger.money)}. Machines arrive by the south road. Buildings: tap to place.`), h3('Machines'),
+      shopItem('Excavator', PRICES.excavator, 'Digs a site layer by layer and sorts waste from pay dirt.', () => deliver('excavator')),
+      shopItem('Loader', PRICES.loader, 'Hauls pay dirt from piles to the wash plant hopper.', () => deliver('loader')),
+      h3('Buildings'),
+      shopItem('Water pump', PRICES.pump, 'Place within 9 m of water. 60 water units.', () => setTool('build:pump')),
+      shopItem('Generator', PRICES.generator, 'Diesel generator, 60 kW. A wash plant needs 40 kW.', () => setTool('build:generator')),
+      shopItem('Wash plant', PRICES.plant, 'Trommel and sluice. Needs 40 kW, 100 water and an operator.', () => setTool('build:plant')),
+      shopItem('Bunkhouse', PRICES.bunkhouse, 'Four beds for crew.', () => setTool('build:bunkhouse')));
+  } else if (drawer === 'crew') {
+    $('#drawerTitle').textContent = 'Crew';
+    const need = machines.length + structures.filter(s => s.kind === 'plant').length;
+    body.append(p(`${ledger.workers} workers on the payroll, ${beds()} beds. Your machines and plants need ${need} operators to all run at once. Wages: ${money(T.wage * 60)} per worker per minute.`),
+      (() => { const r = document.createElement('div'); r.className = 'row'; r.append(btn(`Hire worker ${money(PRICES.hire)}`, hireWorker), btn('Let one go', fireWorker)); return r; })(),
+      p('Crew are assigned automatically: wash plants first, then excavators with a dig site, then loaders.'));
+  } else if (drawer === 'tune') {
+    $('#drawerTitle').textContent = 'Tune numbers';
+    body.append(p('Changes apply live and are saved in this browser.'));
+    for (const f of T_FIELDS) body.append(sliderRow(...f));
+    const r = document.createElement('div'); r.className = 'row';
+    r.append(btn('Reset to defaults', () => { Object.assign(T, DEFAULT_T); saveTune(); renderDrawer(); }, 'warn'), btn('Copy my tuning', copyTuning));
+    const box2 = document.createElement('textarea'); box2.className = 'copybox'; box2.id = 'copyBox'; box2.readOnly = true; box2.hidden = true;
+    body.append(r, p('Copy my tuning copies every number you changed, so you can paste it into the chat with Claude.'), box2);
+  } else if (drawer === 'season') {
+    $('#drawerTitle').textContent = 'Season over';
+    const worth = ledger.money + ledger.goldSafe * ledger.price;
+    const tbl = document.createElement('table'); tbl.className = 'rep';
+    tbl.innerHTML = `<tr><td>Gold washed</td><td class="n">${ledger.goldWashed.toFixed(1)} g</td></tr><tr><td>Gold sold</td><td class="n">${ledger.goldSold.toFixed(1)} g</td></tr><tr><td>Gold still in the safe</td><td class="n">${ledger.goldSafe.toFixed(1)} g</td></tr><tr><td>Money earned</td><td class="n">${money(ledger.earned)}</td></tr><tr><td>Money spent</td><td class="n">${money(ledger.spent)}</td></tr><tr><td>Cash plus gold</td><td class="n">${money(worth)}</td></tr><tr><td>Started with</td><td class="n">$25,000</td></tr>`;
+    body.append(p(worth >= 25000 ? 'The claim paid. The bank is happy.' : 'The claim lost money this season.'), tbl,
+      (() => { const r = document.createElement('div'); r.className = 'row'; r.append(btn('Keep digging', () => { ledger.seasonT = -1e9; drawer = null; renderDrawer(); setSpeed(1); }), btn('New claim', () => location.reload(), 'warn')); return r; })());
+  } else {
+    $('#drawerTitle').textContent = 'How to mine';
+    const dl = document.createElement('dl'); dl.className = 'keys';
+    for (const [k, v] of [['Tap', 'Select a machine, building or pile'], ['Tap ground', 'Drive the selected machine there'], ['Dig here', 'Excavator digs that spot down to bedrock'], ['Drag', 'Pan'], ['Pinch', 'Zoom and rotate'], ['Wheel', 'Zoom (mouse)'], ['Q / E', 'Rotate'], ['WASD', 'Pan'], ['Space', 'Pause']]) {
+      const dt = document.createElement('dt'); dt.textContent = k; const dd = document.createElement('dd'); dd.textContent = v; dl.append(dt, dd);
+    }
+    body.append(dl, h3('The ground'),
+      p('Under the grass is brown overburden with almost no gold, then orange pay gravel, then grey bedrock. Gold follows a buried ancient riverbed and is richest in the last half meter above bedrock.'),
+      p('The excavator digs top down. Buckets below the pay dirt cutoff go to the waste pile, the rest to the pay dirt pile. Loaders haul pay dirt to the wash plant. The plant needs an operator, power and water. Gold goes to the safe. Sell it when the price is good.'),
+      p('Dig below the water table and the pit floods. Machines cannot drive into water or up pit walls steeper than about 30 degrees.'),
+      p('Sound is made live. On iPhone, tap the sound button once.'));
+  }
+}
+function copyTuning() {
+  const diff = {};
+  for (const k in DEFAULT_T) if (Math.abs(T[k] - DEFAULT_T[k]) > 1e-9) diff[k] = { was: DEFAULT_T[k], now: T[k] };
+  const text = Object.keys(diff).length ? 'Bedrock Claim tuning: ' + JSON.stringify(diff) : 'Bedrock Claim tuning: no changes from the defaults.';
+  const box2 = $('#copyBox');
+  const show = () => { if (box2) { box2.hidden = false; box2.value = text; box2.focus(); box2.select(); } };
+  try { navigator.clipboard.writeText(text).then(() => { toast('Copied. Paste it into the chat.', 2600); show(); }, () => { show(); toast('Select the text below and copy it.', 2600); }); }
+  catch (e) { show(); toast('Select the text below and copy it.', 2600); }
+}
+
+// =============================================================== sound (synthesized live with Web Audio)
+const SFX = { ctx: null, on: true, master: null, wet: null, noise: null, voices: 0, voiceT: 0, hum: null, rattle: null };
+function audioInit() {
+  if (!SFX.on) return;
+  if (SFX.ctx) { unlockAudio(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  try {
+    const ctx = new AC(); SFX.ctx = ctx;
+    SFX.master = ctx.createGain(); SFX.master.gain.value = 0.7;
+    const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 6;
+    SFX.master.connect(comp); comp.connect(ctx.destination);
+    const nb = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), nd = nb.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+    SFX.noise = nb;
+    const ir = ctx.createBuffer(2, Math.floor(ctx.sampleRate * 1.6), ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const a = ir.getChannelData(ch); for (let i = 0; i < a.length; i++) a[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / a.length, 3); }
+    const conv = ctx.createConvolver(); conv.buffer = ir;
+    SFX.wet = ctx.createGain(); SFX.wet.gain.value = 0.18; SFX.wet.connect(conv); conv.connect(SFX.master);
+    const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), lp = ctx.createBiquadFilter(), hg = ctx.createGain();
+    o1.type = 'sawtooth'; o1.frequency.value = 42; o2.type = 'sawtooth'; o2.frequency.value = 63.5; lp.type = 'lowpass'; lp.frequency.value = 240; hg.gain.value = 0;
+    o1.connect(lp); o2.connect(lp); lp.connect(hg); hg.connect(SFX.master); o1.start(); o2.start();
+    SFX.hum = { g: hg, o1, o2 };
+    const rs = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), rg = ctx.createGain();
+    rs.buffer = nb; rs.loop = true; bp.type = 'bandpass'; bp.frequency.value = 700; bp.Q.value = 0.8; rg.gain.value = 0;
+    rs.connect(bp); bp.connect(rg); rg.connect(SFX.master); rs.start();
+    SFX.rattle = rg;
+    ctx.onstatechange = updateSoundLabel;
+    unlockAudio();
+  } catch (e) { SFX.ctx = null; }
+}
+let silentEl = null;
+function silentWavURL() {
+  const n = 4000, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, n, true);
+  for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+  let bin = ''; const u8 = new Uint8Array(buf);
+  for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+  return 'data:audio/wav;base64,' + btoa(bin);
+}
+function unlockAudio() {
+  const ctx = SFX.ctx;
+  if (!ctx) return;
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* not supported */ }
+  if (!silentEl) { try { silentEl = new Audio(silentWavURL()); silentEl.loop = true; silentEl.setAttribute('playsinline', ''); } catch (e) { silentEl = null; } }
+  if (silentEl && silentEl.paused) { const pr = silentEl.play(); if (pr && pr.catch) pr.catch(() => {}); }
+  if (ctx.state !== 'running') { const r = ctx.resume(); if (r && r.then) r.then(updateSoundLabel, () => {}); }
+  try { const b = ctx.createBuffer(1, 1, 22050), src = ctx.createBufferSource(); src.buffer = b; src.connect(ctx.destination); src.start(0); } catch (e) { /* ignore */ }
+  updateSoundLabel();
+}
+function updateSoundLabel() { const b = $('#sndBtn'); if (!b) return; b.textContent = !SFX.on ? 'Sound off' : (SFX.ctx && SFX.ctx.state === 'running' ? 'Sound on' : 'Tap for sound'); b.setAttribute('aria-pressed', String(SFX.on)); }
+for (const ev of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) document.addEventListener(ev, audioInit, true);
+function sndOut(x, z, reach) {
+  const ctx = SFX.ctx, d = dist(x, z, cam.x, cam.z);
+  const vol = Math.pow(clamp(1 - d / reach, 0, 1), 1.5) * clamp(40 / cam.size, 0.35, 1.3);
+  if (vol < 0.02) return null;
+  const g = ctx.createGain(); g.gain.value = vol;
+  let node = g;
+  if (ctx.createStereoPanner) { const pn = ctx.createStereoPanner(), s = toScreen(x, hAt(x, z), z); pn.pan.value = s ? clamp((s[0] / (glCanvas.clientWidth || 1)) * 2 - 1, -1, 1) * 0.7 : 0; g.connect(pn); node = pn; }
+  node.connect(SFX.master); node.connect(SFX.wet);
+  return g;
+}
+function noiseBurst(out, t0, dur, ftype, f0, f1, q, peak, decay) {
+  const ctx = SFX.ctx, src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+  src.buffer = SFX.noise; f.type = ftype; f.frequency.setValueAtTime(f0, t0); if (f1) f.frequency.exponentialRampToValueAtTime(f1, t0 + dur); f.Q.value = q;
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(peak, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + decay);
+  src.connect(f); f.connect(g); g.connect(out); src.start(t0, Math.random() * 1.5); src.stop(t0 + dur + 0.05);
+}
+function tone(out, t0, type, f0, f1, dur, peak) {
+  const ctx = SFX.ctx, o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(peak, t0 + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(out); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function sfx(kind, x, z) {
+  if (!SFX.ctx || !SFX.on || timeScale === 0 || SFX.ctx.state !== 'running') return;
+  const now = SFX.ctx.currentTime;
+  if (now - SFX.voiceT > 0.1) { SFX.voiceT = now; SFX.voices = 0; }
+  if (++SFX.voices > 8) return;
+  let out;
+  if (kind === 'click' || kind === 'cash') { out = SFX.ctx.createGain(); out.gain.value = kind === 'cash' ? 0.35 : 0.2; out.connect(SFX.master); }
+  else { out = sndOut(x, z, 160); if (!out) return; }
+  const t = now + 0.01;
+  switch (kind) {
+    case 'dig': noiseBurst(out, t, 0.7, 'bandpass', 900, 300, 1.2, 0.7, 0.6); noiseBurst(out, t + 0.15, 0.4, 'lowpass', 400, 150, 0.7, 0.5, 0.35); break;
+    case 'dump': noiseBurst(out, t, 1.0, 'lowpass', 700, 120, 0.6, 0.9, 0.85); tone(out, t, 'sine', 70, 40, 0.3, 0.6); break;
+    case 'ding': tone(out, t, 'sine', 1760, 1700, 0.5, 0.25); tone(out, t, 'sine', 2637, 2600, 0.35, 0.12); break;
+    case 'cash': tone(out, t, 'square', 1046, 1046, 0.08, 0.2); tone(out, t + 0.08, 'square', 1568, 1568, 0.18, 0.2); noiseBurst(out, t + 0.05, 0.4, 'highpass', 5000, 0, 0.5, 0.25, 0.3); break;
+    case 'click': tone(out, t, 'sine', 880, 660, 0.06, 0.5); break;
+  }
+}
+function updateAmbience() {
+  if (!SFX.ctx || !SFX.hum) return;
+  const t = SFX.ctx.currentTime, on = SFX.on && timeScale > 0;
+  let eng = 0;
+  for (const m of machines) if (m.crewed && (m.moving || (m.order && m.order.k === 'dig'))) eng += Math.pow(clamp(1 - dist(m.x, m.z, cam.x, cam.z) / 120, 0, 1), 1.5);
+  for (const s of structures) if (s.kind === 'generator' && s.on) eng += 0.5 * Math.pow(clamp(1 - dist(s.x, s.z, cam.x, cam.z) / 120, 0, 1), 1.5);
+  let rat = 0;
+  for (const s of structures) if (s.kind === 'plant' && s.running) rat = Math.max(rat, Math.pow(clamp(1 - dist(s.x, s.z, cam.x, cam.z) / 110, 0, 1), 1.5));
+  const z = clamp(40 / cam.size, 0.35, 1.3);
+  SFX.hum.g.gain.setTargetAtTime(on ? Math.min(0.22, eng * 0.09) * z : 0, t, 0.2);
+  SFX.rattle.gain.setTargetAtTime(on ? rat * 0.07 * z : 0, t, 0.2);
+}
+$('#sndBtn').addEventListener('click', () => {
+  const wasRunning = SFX.ctx && SFX.ctx.state === 'running';
+  if (wasRunning || !SFX.on) SFX.on = !SFX.on;
+  if (SFX.on) { audioInit(); setTimeout(() => { if (SFX.ctx) tone(SFX.master, SFX.ctx.currentTime + 0.01, 'sine', 880, 660, 0.12, 0.5); }, 60); }
+  if (!SFX.on && silentEl) silentEl.pause();
+  updateSoundLabel();
+});
+updateSoundLabel();
+
+// =============================================================== loop
+function syncMeshes(dt) {
+  for (const m of machines) {
+    m.mesh.position.set(m.x, m.y, m.z);
+    const tilt = Math.atan2(hAt(m.x + Math.sin(m.heading) * 2, m.z + Math.cos(m.heading) * 2) - hAt(m.x - Math.sin(m.heading) * 2, m.z - Math.cos(m.heading) * 2), 4);
+    m.mesh.rotation.set(-tilt, m.heading, 0, 'YXZ');
+    const u = m.mesh.userData;
+    if (m.type === 'excavator') { u.house.rotation.y = m.swing; u.boom.rotation.x = m.boom; u.stick.rotation.x = m.stick; u.load.visible = !!m.bucketFull; }
+    else { u.arms.rotation.x = m.cargo > 0 ? -0.45 : 0.15; u.load.visible = m.cargo > 0; }
+  }
+  for (const s of structures) if (s.kind === 'plant' && s.running) s.mesh.userData.trommel.rotation.y += dt * 2.5;
+}
+let last = performance.now(), uiT = 0;
+const perf = { frames: 0, t: 0, sim: 0, draw: 0 };
+function frame(now) {
+  const real = Math.min(0.1, (now - last) / 1000); last = now;
+  const t0 = performance.now();
+  keyPan(real);
+  let acc = real * timeScale;
+  while (acc > 0) { const d = Math.min(acc, 0.05); step(d); acc -= d; }
+  syncMeshes(real * timeScale);
+  updateEffects(real * timeScale);
+  flushTerrain();
+  const t1 = performance.now();
+  placeCamera();
+  renderer.render(scene, camera);
+  drawHUD();
+  updateAmbience();
+  const t2 = performance.now();
+  perf.sim += t1 - t0; perf.draw += t2 - t1; perf.frames++; perf.t += real;
+  if (perf.t >= 0.5) { $('#perf').textContent = `${Math.round(perf.frames / perf.t)} fps · logic ${(perf.sim / perf.frames).toFixed(1)} ms · draw ${(perf.draw / perf.frames).toFixed(1)} ms`; perf.frames = 0; perf.t = 0; perf.sim = 0; perf.draw = 0; }
+  uiT -= real;
+  if (uiT <= 0) { uiT = 0.4; renderStats(); refreshCmd(); }
+  requestAnimationFrame(frame);
+}
+function resize() { renderer.setSize(glCanvas.clientWidth, glCanvas.clientHeight, false); }
+window.addEventListener('resize', resize);
+
+setupClaim();
+for (const s of structures) if (s.kind === 'pump') s.wetOK = waterNear(s.x, s.z, 9) > 0;
+window.__claim = { machines, structures, piles, ledger, T, digAt };
+resize();
+renderStats();
+refreshCmd();
+toast('Your claim. Select the excavator and tap Dig here near the plant. The old riverbed runs right through it.', 5500);
+requestAnimationFrame(frame);
+})();
+</script>
