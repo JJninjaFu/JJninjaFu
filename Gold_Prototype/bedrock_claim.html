@@ -77,6 +77,10 @@ button.goldbtn { background: #4a3812; border-color: var(--gold); color: #ffe3a0;
 table.rep { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 15px; }
 table.rep td { padding: 5px 4px; border-bottom: 1px solid #2c261d; }
 table.rep td.n { text-align: right; color: var(--gold); font-weight: 600; }
+.board { display: flex; flex-direction: column; gap: 1px; font-size: 14px; font-variant-numeric: tabular-nums; border-top: 1px solid var(--line); padding-top: 4px; margin-top: 2px; }
+.board .me { color: var(--gold); font-weight: 700; }
+.field { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+.field input, .field select { background: #12100c; border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; color: var(--ink); min-height: 36px; font-family: var(--ui); font-size: 16px; }
 .keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 14px; margin: 0; }
 .keys dt { color: var(--gold); font-weight: 600; }
 .keys dd { margin: 0; }
@@ -98,6 +102,7 @@ table.rep td.n { text-align: right; color: var(--gold); font-weight: 600; }
       <h1>Bedrock Claim</h1>
       <div class="stats" id="stats"></div>
       <div class="perf" id="perf">measuring…</div>
+      <div class="board" id="board" hidden></div>
     </div>
     <div class="controls">
       <div class="seg" id="speedSeg" role="group" aria-label="Game speed">
@@ -106,6 +111,7 @@ table.rep td.n { text-align: right; color: var(--gold); font-weight: 600; }
         <button data-speed="2">2×</button>
         <button data-speed="4">4×</button>
       </div>
+      <button data-drawer="race">Race</button>
       <button data-drawer="shop">Shop</button>
       <button data-drawer="crew">Crew</button>
       <button id="surveyBtn">Survey</button>
@@ -526,6 +532,7 @@ function updateEffects(dt) {
 // =============================================================== claim state
 const machines = [], structures = [], piles = [];
 const ledger = { money: 25000, goldSafe: 0, goldWashed: 0, goldSold: 0, earned: 0, spent: 0, workers: 3, price: T.goldPrice, seasonT: 0, over: false };
+let race = { active: false };
 let simTime = 0, timeScale = 1, toolMode = null, sel = null, surveyBought = false, ID = 1;
 const KIND = { waste: 1, pay: 2, tail: 3 };
 class Pile {
@@ -710,9 +717,13 @@ function updateStructures(dt) {
 function updateLedger(dt) {
   spend(T.wage * ledger.workers * dt);
   ledger.priceT = (ledger.priceT || 0) + dt;
-  if (ledger.priceT > 8) { ledger.priceT = 0; ledger.price = clamp(ledger.price * (1 + rand(-0.025, 0.026)), T.goldPrice * 0.6, T.goldPrice * 1.6); }
-  ledger.seasonT += dt;
-  if (!ledger.over && ledger.seasonT >= T.seasonMin * 60) { ledger.over = true; setSpeed(0); drawer = 'season'; renderDrawer(); sfx('cash', cam.x, cam.z); }
+  if (ledger.priceT > 8) { ledger.priceT = 0; ledger.priceN = (ledger.priceN || 0) + 1; ledger.price = clamp(ledger.price * (1 + hash(ledger.priceN, 3.7) * 0.051 - 0.025), T.goldPrice * 0.6, T.goldPrice * 1.6); }
+  if (race.active) ledger.seasonT = (Date.now() - race.startAt) / 1000; else ledger.seasonT += dt;
+  if (!ledger.over && ledger.seasonT >= T.seasonMin * 60) {
+    ledger.over = true;
+    if (race.active) pushPresence(); else setSpeed(0);
+    drawer = 'season'; renderDrawer(); sfx('cash', cam.x, cam.z);
+  }
 }
 function sellGold() {
   if (ledger.goldSafe < 0.01) return toast('The safe is empty. Wash some pay dirt first.', 2200);
@@ -921,6 +932,13 @@ function drawHUD() {
     if (!s) continue;
     badge(c, s[0], s[1], m.name, m.state, m.crewed ? '#e3b448' : '#d4574a', sel === m);
   }
+  if (race.active && Date.now() < race.startAt + 1000) {
+    const n = Math.ceil((race.startAt - Date.now()) / 1000);
+    c.fillStyle = 'rgba(20,16,10,0.75)'; c.fillRect(w / 2 - 170, h / 2 - 64, 340, 128);
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = '400 60px Rye, Georgia, serif'; c.fillStyle = '#e3b448'; c.fillText(n > 0 ? String(n) : 'Dig!', w / 2, h / 2 - 12);
+    c.font = '600 16px "Barlow Condensed", sans-serif'; c.fillStyle = '#efe5cf'; c.fillText('Most gold washed in one year wins.', w / 2, h / 2 + 40);
+  }
 }
 
 // =============================================================== UI
@@ -929,12 +947,15 @@ function toast(text, ms) { if (toolMode) return; $('#toastText').textContent = t
 function toastPersist(text) { clearTimeout(toastTimer); $('#toastText').textContent = text; $('#toastCancel').hidden = false; $('#toast').hidden = false; }
 function hideToast() { $('#toast').hidden = true; }
 $('#toastCancel').addEventListener('click', () => setTool(null));
-function setSpeed(s) { timeScale = s; for (const b of document.querySelectorAll('#speedSeg button')) b.classList.toggle('on', +b.dataset.speed === s); }
+function setSpeed(s) {
+  if (race.active && s !== 1) { toast('Speed is locked to 1× during a race.', 2000); s = 1; }
+  timeScale = s; for (const b of document.querySelectorAll('#speedSeg button')) b.classList.toggle('on', +b.dataset.speed === s); }
 for (const b of document.querySelectorAll('#speedSeg button')) b.addEventListener('click', () => setSpeed(+b.dataset.speed));
 function btn(label, fn, cls) { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.addEventListener('click', fn); return b; }
 function renderStats() {
   const left = Math.max(0, T.seasonMin * 60 - ledger.seasonT), mm = Math.floor(left / 60), ss = String(Math.floor(left % 60)).padStart(2, '0');
-  $('#stats').innerHTML = `<span class="${ledger.money < 0 ? 'neg' : ''}"><b>${money(ledger.money)}</b></span><span>Safe <b>${ledger.goldSafe.toFixed(1)} g</b></span><span>Gold <b>$${ledger.price.toFixed(0)}/g</b></span><span>Crew <b>${ledger.workers}/${beds()}</b></span><span>Season <b>${mm}:${ss}</b></span>`;
+  const month = Math.min(12, Math.floor(Math.max(0, ledger.seasonT) / (T.seasonMin * 60) * 12) + 1);
+  $('#stats').innerHTML = `<span class="${ledger.money < 0 ? 'neg' : ''}"><b>${money(ledger.money)}</b></span><span>Safe <b>${ledger.goldSafe.toFixed(1)} g</b></span><span>Gold <b>$${ledger.price.toFixed(0)}/g</b></span><span>Crew <b>${ledger.workers}/${beds()}</b></span><span>Month <b>${month}/12</b></span><span>${race.active ? 'Race' : 'Year'} <b>${mm}:${ss}</b></span>`;
 }
 function refreshCmd() {
   const info = $('#selInfo'), cmds = $('#cmds');
@@ -1051,6 +1072,7 @@ function renderDrawer() {
       p('Crew are assigned automatically: wash plants first, then excavators with a dig site, then loaders.'));
   } else if (drawer === 'tune') {
     $('#drawerTitle').textContent = 'Tune numbers';
+    if (race.active) { body.append(p('Tuning is locked to the defaults during a race, so every claim is fair. Your own numbers come back after the race.')); return; }
     body.append(p('Changes apply live and are saved in this browser.'));
     for (const f of T_FIELDS) body.append(sliderRow(...f));
     const r = document.createElement('div'); r.className = 'row';
@@ -1058,12 +1080,23 @@ function renderDrawer() {
     const box2 = document.createElement('textarea'); box2.className = 'copybox'; box2.id = 'copyBox'; box2.readOnly = true; box2.hidden = true;
     body.append(r, p('Copy my tuning copies every number you changed, so you can paste it into the chat with Claude.'), box2);
   } else if (drawer === 'season') {
-    $('#drawerTitle').textContent = 'Season over';
+    $('#drawerTitle').textContent = race.active ? 'Year over' : 'Season over';
     const worth = ledger.money + ledger.goldSafe * ledger.price;
     const tbl = document.createElement('table'); tbl.className = 'rep';
     tbl.innerHTML = `<tr><td>Gold washed</td><td class="n">${ledger.goldWashed.toFixed(1)} g</td></tr><tr><td>Gold sold</td><td class="n">${ledger.goldSold.toFixed(1)} g</td></tr><tr><td>Gold still in the safe</td><td class="n">${ledger.goldSafe.toFixed(1)} g</td></tr><tr><td>Money earned</td><td class="n">${money(ledger.earned)}</td></tr><tr><td>Money spent</td><td class="n">${money(ledger.spent)}</td></tr><tr><td>Cash plus gold</td><td class="n">${money(worth)}</td></tr><tr><td>Started with</td><td class="n">$25,000</td></tr>`;
+    if (race.active) {
+      const rows = mpPlayers(), waiting = rows.some(r => r.phase === 'race' || r.phase === 'count');
+      const top = rows.slice().sort((a, b) => b.gold - a.gold)[0];
+      const tg = rows.filter(r => r.team === 'gold').reduce((a, r) => a + r.gold, 0), ts = rows.filter(r => r.team === 'silver').reduce((a, r) => a + r.gold, 0);
+      const teamWin = tg && ts ? (tg >= ts ? `Team Gold wins, ${tg.toFixed(1)} g to ${ts.toFixed(1)} g.` : `Team Silver wins, ${ts.toFixed(1)} g to ${tg.toFixed(1)} g.`) : null;
+      body.append(h3('Standings'), p(waiting ? 'Waiting for the others to finish their year.' : teamWin || (top.me ? `You win with ${top.gold.toFixed(1)} g!` : `${top.nick} wins with ${top.gold.toFixed(1)} g.`)), standings(), h3('Your claim'), tbl,
+        (() => { const r = document.createElement('div'); r.className = 'row'; r.append(btn('Back to the lobby', endRace)); return r; })());
+      return;
+    }
     body.append(p(worth >= 25000 ? 'The claim paid. The bank is happy.' : 'The claim lost money this season.'), tbl,
       (() => { const r = document.createElement('div'); r.className = 'row'; r.append(btn('Keep digging', () => { ledger.seasonT = -1e9; drawer = null; renderDrawer(); setSpeed(1); }), btn('New claim', () => location.reload(), 'warn')); return r; })());
+  } else if (drawer === 'race') {
+    renderRaceDrawer(body, p, h3);
   } else {
     $('#drawerTitle').textContent = 'How to mine';
     const dl = document.createElement('dl'); dl.className = 'keys';
@@ -1201,6 +1234,161 @@ $('#sndBtn').addEventListener('click', () => {
 });
 updateSoundLabel();
 
+// =============================================================== multiplayer race (artifact room: live presence, nothing stored)
+// Every player digs an identical claim (same seed) on their own device. Presence carries
+// name, team, gold washed and the shared start time; anyone in the room can start a race.
+const TEAMS = { solo: 'Free for all', gold: 'Team Gold', silver: 'Team Silver' };
+const NICK_KEY = 'bedrockClaim.nick';
+const mp = { lobby: null, checked: false, room: null, unsub: null, code: '', nick: 'Prospector', team: 'solo', minutes: 15, status: '', lastSent: '' };
+try { mp.nick = localStorage.getItem(NICK_KEY) || mp.nick; } catch (e) { /* storage unavailable */ }
+mp.code = Array.from({ length: 4 }, () => 'abcdefghjkmnpqrstuvwxyz'[Math.floor(Math.random() * 23)]).join('');
+if (window.claude && typeof window.claude.use === 'function') {
+  window.claude.use('room').then(r => { mp.lobby = r; mp.checked = true; if (drawer === 'race') renderDrawer(); }, () => { mp.checked = true; if (drawer === 'race') renderDrawer(); });
+} else mp.checked = true;
+function myPhase() { return !race.active ? 'lobby' : Date.now() < race.startAt ? 'count' : ledger.over ? 'done' : 'race'; }
+function pushPresence() {
+  if (!mp.room) return;
+  const pr = { nick: mp.nick, team: mp.team, gold: Math.round(ledger.goldWashed * 10) / 10, phase: myPhase(), startAt: race.active ? race.startAt : 0, minutes: race.active ? race.minutes : mp.minutes };
+  const key = JSON.stringify(pr);
+  if (key === mp.lastSent) return;
+  mp.lastSent = key;
+  mp.room.presence(pr).catch(() => { mp.lastSent = ''; });
+}
+function mpPlayers() {
+  const mine = { nick: mp.nick, team: mp.team, gold: ledger.goldWashed, phase: myPhase(), me: true };
+  if (!mp.room) return [mine];
+  return mp.room.peers().filter(p => p.kind === 'viewer').map(p => {
+    if (p.sameTab) return mine;
+    const pr = p.presence || {}, g = Number(pr.gold);
+    return { nick: String(pr.nick || 'Prospector').slice(0, 16), team: TEAMS[pr.team] ? pr.team : 'solo', gold: isFinite(g) ? Math.max(0, g) : 0, phase: String(pr.phase || 'lobby'), me: false };
+  });
+}
+function standings() {
+  const rows = mpPlayers().sort((a, b) => b.gold - a.gold), tbl = document.createElement('table');
+  tbl.className = 'rep';
+  rows.forEach((r, i) => {
+    const tr = tbl.insertRow(), a = tr.insertCell(), b = tr.insertCell();
+    a.textContent = `${i + 1}. ${r.nick}${r.me ? ' (you)' : ''}${r.team !== 'solo' ? ' · ' + TEAMS[r.team] : ''}${r.phase === 'race' || r.phase === 'count' ? ' · digging' : ''}`;
+    b.className = 'n'; b.textContent = r.gold.toFixed(1) + ' g';
+  });
+  const tg = rows.filter(r => r.team === 'gold').reduce((a, r) => a + r.gold, 0), ts = rows.filter(r => r.team === 'silver').reduce((a, r) => a + r.gold, 0);
+  if (rows.some(r => r.team !== 'solo')) {
+    const tr = tbl.insertRow(), a = tr.insertCell(), b = tr.insertCell();
+    a.textContent = `Team Gold ${tg.toFixed(1)} g vs Team Silver`; b.className = 'n'; b.textContent = ts.toFixed(1) + ' g';
+  }
+  return tbl;
+}
+function renderBoard() {
+  const el = $('#board');
+  if (!mp.room && !race.active) { el.hidden = true; return; }
+  el.hidden = false; el.textContent = '';
+  mpPlayers().sort((a, b) => b.gold - a.gold).slice(0, 4).forEach((r, i) => {
+    const d = document.createElement('div');
+    d.textContent = `${i + 1}. ${r.nick}${r.team !== 'solo' ? ' (' + (r.team === 'gold' ? 'G' : 'S') + ')' : ''}  ${r.gold.toFixed(1)} g`;
+    if (r.me) d.className = 'me';
+    el.append(d);
+  });
+}
+function renderPeerList() {
+  const el = $('#peerList');
+  if (!el) return;
+  el.textContent = '';
+  el.append(standings());
+  const n = mpPlayers().length, sb = $('#startBtn');
+  if (sb) sb.disabled = n > 4;
+  if (n > 4) { const w = document.createElement('p'); w.textContent = `${n} people are here. A race takes 4 at most; someone should pick another room code.`; el.append(w); }
+}
+function checkStart() {
+  if (!mp.room || (race.active && !ledger.over)) return;
+  for (const p of mp.room.peers()) {
+    if (p.sameTab) continue;
+    const pr = p.presence || {}, st = Number(pr.startAt) || 0;
+    if (st && st !== race.startAt && st > Date.now() - 15000 && st < Date.now() + 60000 && (pr.phase === 'count' || pr.phase === 'race')) { beginRace(st, Number(pr.minutes)); return; }
+  }
+}
+function onRoomChange() { checkStart(); renderPeerList(); renderBoard(); if (drawer === 'season' && race.active) renderDrawer(); }
+async function joinRoom(code) {
+  code = String(code).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+  if (!code) return toast('Type a room code first.', 2000);
+  mp.code = code; mp.status = 'Joining…'; renderDrawer();
+  try {
+    const r = await mp.lobby.join('bc-' + code);
+    mp.room = r; mp.status = ''; mp.lastSent = '';
+    mp.unsub = r.onPeers(onRoomChange, () => { mp.room = null; mp.status = 'Lost the connection to the room. Join again.'; if (drawer === 'race') renderDrawer(); });
+    pushPresence();
+  } catch (e) { mp.status = 'Could not join the room (' + ((e && e.code) || 'error') + ').'; }
+  renderDrawer();
+}
+function leaveRoom() {
+  if (mp.unsub) mp.unsub();
+  if (mp.room) mp.room.leave().catch(() => {});
+  mp.room = null; mp.unsub = null;
+  if (race.active) endRace(); else renderDrawer();
+}
+function resetClaim() {
+  for (const m of machines) scene.remove(m.mesh);
+  for (const s of structures) scene.remove(s.mesh);
+  machines.length = 0; structures.length = 0; piles.length = 0;
+  loose.fill(0); looseKind.fill(0); blocked.fill(0);
+  genGround();
+  Object.assign(ledger, { money: 25000, goldSafe: 0, goldWashed: 0, goldSold: 0, earned: 0, spent: 0, workers: 3, price: T.goldPrice, seasonT: 0, over: false, priceT: 0, priceN: 0 });
+  sel = null; toolMode = null; hideToast(); surveyBought = false; survey = false;
+  $('#surveyBtn').classList.remove('on'); $('#surveyBtn').textContent = 'Survey';
+  setupClaim();
+  for (const s of structures) if (s.kind === 'pump') s.wetOK = waterNear(s.x, s.z, 9) > 0;
+  markDirtyAll();
+}
+function beginRace(startAt, minutes) {
+  if (!race.active) race.savedT = Object.assign({}, T);
+  race = { active: true, startAt, minutes: [10, 15, 20, 30].includes(minutes) ? minutes : 15, savedT: race.savedT };
+  Object.assign(T, DEFAULT_T); T.seasonMin = race.minutes;
+  resetClaim();
+  setSpeed(1);
+  drawer = null; renderDrawer(); renderBoard(); pushPresence();
+  cam.x = -2; cam.z = 22;
+}
+function endRace() {
+  if (race.savedT) Object.assign(T, race.savedT);
+  race = { active: false, startAt: race.startAt };
+  ledger.over = false; ledger.seasonT = 0;
+  drawer = 'race'; renderDrawer(); pushPresence();
+}
+function renderRaceDrawer(body, p, h3) {
+  $('#drawerTitle').textContent = 'Claim race';
+  body.append(p('Up to 4 prospectors each work an identical claim at the same time. Most gold washed in one year wins. Pick a team for 2 v 2, or play free for all.'));
+  if (!mp.lobby) { body.append(p(mp.checked ? 'Multiplayer works when this page is open on claude.ai and shared with your friends. It is not available in this view.' : 'Connecting…')); return; }
+  const field = (label, el) => { const d = document.createElement('label'); d.className = 'field'; const s = document.createElement('span'); s.textContent = label; d.append(s, el); return d; };
+  const nick = document.createElement('input'); nick.type = 'text'; nick.maxLength = 16; nick.value = mp.nick; nick.autocomplete = 'off';
+  nick.addEventListener('change', () => { mp.nick = nick.value.trim().slice(0, 16) || 'Prospector'; try { localStorage.setItem(NICK_KEY, mp.nick); } catch (e) { /* ignore */ } pushPresence(); renderPeerList(); });
+  const team = document.createElement('select');
+  for (const k in TEAMS) { const o = document.createElement('option'); o.value = k; o.textContent = TEAMS[k]; team.append(o); }
+  team.value = mp.team;
+  team.addEventListener('change', () => { mp.team = team.value; pushPresence(); renderPeerList(); });
+  body.append(field('Your name', nick), field('Team', team));
+  if (!mp.room) {
+    const code = document.createElement('input'); code.type = 'text'; code.maxLength = 8; code.value = mp.code; code.autocomplete = 'off'; code.autocapitalize = 'none';
+    body.append(h3('Room'), p('Everyone types the same room code.'), field('Room code', code),
+      (() => { const r = document.createElement('div'); r.className = 'row'; r.append(btn('Join room', () => joinRoom(code.value))); return r; })());
+    if (mp.status) body.append(p(mp.status));
+    return;
+  }
+  body.append(h3('Room ' + mp.code));
+  const list = document.createElement('div'); list.id = 'peerList'; body.append(list);
+  if (race.active) {
+    body.append(p(ledger.over ? 'Your year is over.' : 'Race in progress. Tuning and speed are locked.'),
+      (() => { const r = document.createElement('div'); r.className = 'row'; r.append(btn('Leave the race', endRace, 'warn')); return r; })());
+  } else {
+    const mins = document.createElement('select');
+    for (const m of [10, 15, 20, 30]) { const o = document.createElement('option'); o.value = m; o.textContent = `${m} minutes`; mins.append(o); }
+    mins.value = String(mp.minutes);
+    mins.addEventListener('change', () => { mp.minutes = +mins.value; pushPresence(); });
+    const start = btn('Start the race for everyone', () => beginRace(Date.now() + 6000, mp.minutes), 'goldbtn'); start.id = 'startBtn';
+    body.append(field('One year lasts', mins), p('Starting wipes your current claim. Everyone in the room starts on a fresh claim at the same moment.'),
+      (() => { const r = document.createElement('div'); r.className = 'row'; r.append(start, btn('Leave room', leaveRoom)); return r; })());
+  }
+  renderPeerList();
+}
+
 // =============================================================== loop
 function syncMeshes(dt) {
   for (const m of machines) {
@@ -1219,10 +1407,11 @@ function frame(now) {
   const real = Math.min(0.1, (now - last) / 1000); last = now;
   const t0 = performance.now();
   keyPan(real);
-  let acc = real * timeScale;
+  const sc = race.active ? (Date.now() < race.startAt || ledger.over ? 0 : 1) : timeScale;
+  let acc = real * sc;
   while (acc > 0) { const d = Math.min(acc, 0.05); step(d); acc -= d; }
-  syncMeshes(real * timeScale);
-  updateEffects(real * timeScale);
+  syncMeshes(real * sc);
+  updateEffects(real * sc);
   flushTerrain();
   const t1 = performance.now();
   placeCamera();
@@ -1233,7 +1422,7 @@ function frame(now) {
   perf.sim += t1 - t0; perf.draw += t2 - t1; perf.frames++; perf.t += real;
   if (perf.t >= 0.5) { $('#perf').textContent = `${Math.round(perf.frames / perf.t)} fps · logic ${(perf.sim / perf.frames).toFixed(1)} ms · draw ${(perf.draw / perf.frames).toFixed(1)} ms`; perf.frames = 0; perf.t = 0; perf.sim = 0; perf.draw = 0; }
   uiT -= real;
-  if (uiT <= 0) { uiT = 0.4; renderStats(); refreshCmd(); }
+  if (uiT <= 0) { uiT = 0.4; renderStats(); refreshCmd(); renderBoard(); pushPresence(); }
   requestAnimationFrame(frame);
 }
 function resize() { renderer.setSize(glCanvas.clientWidth, glCanvas.clientHeight, false); }
