@@ -6,16 +6,16 @@ Living summary of decisions so far, so any Claude session can pick up where the 
 
 - Multiplayer RTS. Inspirations: Company of Heroes, Dawn of War, Beyond All Reason, Zero-K, Defilade,
   Call to Arms: Gates of Hell, Homeworld: Deserts of Kharak.
-- **Fully deformable terrain** down to an indestructible bedrock layer. Working in the laptop
-  project, with a hand-sculpted height map: two big plateaus either player can climb. High ground
-  gives visibility, and the plateaus are meant to get bombarded.
+- **Fully deformable terrain**, working in the laptop project (UE 5.8, Blueprint-only, chunked Geometry Script
+  heightfield copied from a hand-sculpted Landscape): two big plateaus either player can climb.
+  The indestructible bedrock layer is design only, not built yet (see `Unreal_Bridge/UNREAL_BRIEF.md`).
 - Debug: pressing **C** on the terrain deforms it like a mortar or artillery hit. Gravity is fixed (stand-in
   units used to float).
 - 5 blue cylinder stand-in units spawn on Play.
-- **Base protection formula:** destruction is reduced near each player's base so a base can't be
-  cratered into an unbuildable state.
-- **Engineers:** patch terrain at a set rate per second (healing formula), and pile up dirt to build ramps.
-  The Unreal project is not on GitHub yet, so cloud sessions can't see that code.
+- **Base protection (design, not built):** hardened zones where bedrock sits about 0.5 m down, so craters
+  only scar.
+- **Engineers (design, not built):** patch craters and pile up ramps, "crater in reverse" at a dirt-per-second rate.
+- The Unreal project is not on GitHub yet; the laptop session's brief is in `Unreal_Bridge/UNREAL_BRIEF.md`.
 
 ## Setting
 
