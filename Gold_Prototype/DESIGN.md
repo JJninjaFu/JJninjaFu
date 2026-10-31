@@ -58,8 +58,20 @@ Hydroneer, Captain of Industry. Focus on 1 to 2 claims, not a sprawling map.
 ## Plan (agreed with JJ)
 
 1. Big map (done, v4).
-2. Shared world: 2 to 4 players in one world, one browser hosts the simulation and streams state.
+2. Shared world (first version done, v5): 2 to 4 players in one world, one browser hosts the simulation and streams state.
 3. Shootouts: revolvers, saloon hires a posse of 2 to 4 cowboys, carried gold drops on death, town control
    pays the best gold price.
 4. Scale to 8 (4v4) with bots for empty slots.
 Long term the real game lives in JJ's Unreal project; this browser build is the design lab.
+
+## v5: shared world
+
+- Starting a race hands out claim slots: free for all spreads players around the ring, Team Gold takes
+  slots 0 to 3 side by side, Team Silver 4 to 7.
+- Each player simulates only their own claim. Presence (about 6 updates a second, under 4 KB) carries
+  Jimbo, every machine, the buildings and a rolling chunk of terrain edits. Other pages draw them as
+  ghosts with name tags and apply the terrain edits, so you see each other's pits and piles.
+- Old edits are resent slowly in rotation, so dropped updates and late arrivals catch up.
+- Uses presence only (no event topics), so invited Viewers can play too.
+- Not yet: other players' machines don't block your pathfinding, and selling in town has no contest yet
+  (that is step 3, shootouts).

@@ -308,7 +308,12 @@ function colorVertex(i, j) {
 for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { colorVertex(i, j); normalAt(i, j); }
 tGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), SIZE * 0.75);
 let dirty = null;
+let netBox = null, applyingRemote = false;
 function markDirty(i0, j0, i1, j1) {
+  if (!applyingRemote && race.active) {
+    if (!netBox) netBox = [i0, j0, i1, j1];
+    else { netBox[0] = Math.min(netBox[0], i0); netBox[1] = Math.min(netBox[1], j0); netBox[2] = Math.max(netBox[2], i1); netBox[3] = Math.max(netBox[3], j1); }
+  }
   if (!dirty) dirty = [i0, j0, i1, j1];
   else { dirty[0] = Math.min(dirty[0], i0); dirty[1] = Math.min(dirty[1], j0); dirty[2] = Math.max(dirty[2], i1); dirty[3] = Math.max(dirty[3], j1); }
 }
@@ -641,9 +646,9 @@ class Structure {
   get inPt() { return [this.x + Math.sin(this.heading) * (this.S.r + 2.5), this.z + Math.cos(this.heading) * (this.S.r + 2.5)]; }
 }
 function beds() { return structures.filter(s => s.kind === 'bunkhouse').length * 4; }
-const HOME = 0; // your claim slot (multiplayer will hand out 0 to 7)
+let home = 0; // your claim slot; a shared race hands out 0 to 7
 function setupClaim() {
-  const k = HOME, a = k * SEG, at = (u, v) => worldOf(k, u, v);
+  const k = home, a = k * SEG, at = (u, v) => worldOf(k, u, v);
   new Structure('plant', ...at(-20, 8), a);
   new Structure('generator', ...at(-24, 22), a);
   new Structure('pump', ...at(22, 16), a);
@@ -1022,6 +1027,11 @@ function drawHUD() {
     const s = toScreen(TOWN.x + dx, hAt(TOWN.x, TOWN.z) + 6.5, TOWN.z + dz);
     if (s) badge(c, s[0], s[1], label, sub, '#e3b448', false);
   }
+  for (const g of ghosts.values()) {
+    if (!g.jt) continue;
+    const s = toScreen(g.jx, hAt(g.jx, g.jz) + (g.jd >= 0 ? 4.6 : 3.4), g.jz);
+    if (s) badge(c, s[0], s[1], g.nick, g.team !== 'solo' ? TEAMS[g.team] : null, TEAM_COL[g.team], false);
+  }
   if (!jim.driving) {
     const s = toScreen(jim.x, hAt(jim.x, jim.z) + 3.4, jim.z);
     if (s) { c.fillStyle = '#e3b448'; c.beginPath(); c.moveTo(s[0] - 7, s[1] - 10); c.lineTo(s[0] + 7, s[1] - 10); c.lineTo(s[0], s[1]); c.fill(); }
@@ -1165,7 +1175,7 @@ function deliver(type) {
   if (ledger.money < PRICES[type]) return toast(`Not enough money: costs ${money(PRICES[type])}.`, 2400);
   spend(PRICES[type]);
   const m = new Machine(type, TOWN.x + 12 + rand(-2, 2), TOWN.z + 10 + rand(-2, 2), Math.PI * 0.75);
-  const [dx, dz] = worldOf(HOME, -14 + rand(-4, 4), rand(-6, 6));
+  const [dx, dz] = worldOf(home, -14 + rand(-4, 4), rand(-6, 6));
   m.order = { k: 'move', x: dx, z: dz };
   toast(`${m.name} delivered at the dealer in town. It is driving down to the claim.`, 3000); select(m);
 }
@@ -1397,9 +1407,15 @@ const TOWNSPOTS = [];
   const well = add(scene, cyl(1, 1, 0.9, 12), M(0x8a8273), TOWN.x, y0 + 0.45, TOWN.z);
   TOWNSPOTS.push({ x: TOWN.x, z: TOWN.z, r: 1.2 });
 })();
+const stakeMeshes = [];
+function refreshStakes() {
+  const taken = new Set([home]);
+  for (const g of ghosts.values()) if (g.home != null) taken.add(g.home);
+  stakeMeshes.forEach((g, k) => { g.visible = !taken.has(k); });
+}
 for (let k = 0; k < SLOTS; k++) {
-  if (k === HOME) continue;
   const [x, z] = worldOf(k, -20, 8), g = new THREE.Group();
+  stakeMeshes.push(g);
   add(g, box(0.25, 4, 0.25), MAT.wood, 0, 2, 0);
   add(g, box(1.6, 1, 0.08), M(0xd4574a), 0.8, 3.4, 0);
   g.position.set(x, hAt(x, z), z); scene.add(g);
@@ -1443,6 +1459,7 @@ function pushOut(e, r) {
   for (const s of structures) push(s.x, s.z, s.S.r * 0.8);
   for (const t of TOWNSPOTS) push(t.x, t.z, t.r);
   for (const m of machines) if (m !== e && m !== jim.driving) push(m.x, m.z, 1.8);
+  for (const g of ghosts.values()) { for (const m of g.ms) push(m.x, m.z, 1.8); for (const st of g.ss) push(st.x, st.z, st.r * 0.8); }
   e.x = clamp(e.x, -HALF + 3, HALF - 3); e.z = clamp(e.z, -HALF + 3, HALF - 3);
 }
 function driveMachine(m, inp, dt) {
@@ -1628,8 +1645,16 @@ if (window.claude && typeof window.claude.use === 'function') {
 function myPhase() { return !race.active ? 'lobby' : Date.now() < race.startAt ? 'count' : ledger.over ? 'done' : 'race'; }
 function pushPresence() {
   if (!mp.room) return;
-  const pr = { nick: mp.nick, team: mp.team, gold: Math.round(ledger.goldWashed * 10) / 10, phase: myPhase(), startAt: race.active ? race.startAt : 0, minutes: race.active ? race.minutes : mp.minutes };
-  const key = JSON.stringify(pr);
+  const pr = { nick: mp.nick, team: mp.team, gold: Math.round(ledger.goldWashed * 10) / 10, phase: myPhase(), startAt: race.active ? race.startAt : 0, minutes: race.active ? race.minutes : mp.minutes, slots: race.active ? race.slots || null : null, w: race.active ? worldState() : null };
+  let key = JSON.stringify(pr);
+  // presence is capped at 4 KB: shrink the terrain chunk, then the machine list, until it fits
+  while (key.length > 3800 && pr.w) {
+    if (pr.w.t && pr.w.t.length > 21) pr.w.t = pr.w.t.slice(0, Math.max(21, (pr.w.t.length >> 1) | 1));
+    else if (pr.w.t) delete pr.w.t;
+    else if (pr.w.m.length > 4) pr.w.m = pr.w.m.slice(0, pr.w.m.length - 2);
+    else break;
+    key = JSON.stringify(pr);
+  }
   if (key === mp.lastSent) return;
   mp.lastSent = key;
   mp.room.presence(pr).catch(() => { mp.lastSent = ''; });
@@ -1674,7 +1699,8 @@ function bakeMini() {
 function drawMini() {
   const cv = $('#mini'), c = cv.getContext('2d'), sc = MINI / SIZE, P = (x, z) => [(x + HALF) * sc, (z + HALF) * sc];
   c.drawImage(miniBg, 0, 0);
-  for (let k = 0; k < SLOTS; k++) { const [x, z] = P(...worldOf(k, -20, 8)); c.fillStyle = k === HOME ? '#e3b448' : '#d4574a'; c.fillRect(x - 3, z - 3, 6, 6); }
+  for (let k = 0; k < SLOTS; k++) { const [x, z] = P(...worldOf(k, -20, 8)); if (k !== home && !stakeMeshes[k].visible) continue; c.fillStyle = k === home ? '#e3b448' : '#d4574a'; c.fillRect(x - 3, z - 3, 6, 6); }
+  for (const g of ghosts.values()) { if (!g.jt) continue; const [x, z] = P(g.jt[0], g.jt[1]); c.fillStyle = TEAM_COL[g.team]; c.beginPath(); c.arc(x, z, 3, 0, 7); c.fill(); }
   const [tx, tz] = P(TOWN.x, TOWN.z); c.strokeStyle = '#efe5cf'; c.lineWidth = 1.5; c.beginPath(); c.arc(tx, tz, TOWN.r * sc, 0, 7); c.stroke();
   for (const m of machines) { const [x, z] = P(m.x, m.z); c.fillStyle = m.type === 'suv' ? '#c4a86e' : '#f2c230'; c.fillRect(x - 1.5, z - 1.5, 3, 3); }
   const [jx, jz] = P(jim.x, jim.z); c.fillStyle = '#ffffff'; c.beginPath(); c.arc(jx, jz, 3, 0, 7); c.fill();
@@ -1709,10 +1735,10 @@ function checkStart() {
   for (const p of mp.room.peers()) {
     if (p.sameTab) continue;
     const pr = p.presence || {}, st = Number(pr.startAt) || 0;
-    if (st && st !== race.startAt && st > Date.now() - 15000 && st < Date.now() + 60000 && (pr.phase === 'count' || pr.phase === 'race')) { beginRace(st, Number(pr.minutes)); return; }
+    if (st && st !== race.startAt && st > Date.now() - 15000 && st < Date.now() + 60000 && (pr.phase === 'count' || pr.phase === 'race')) { beginRace(st, Number(pr.minutes), pr.slots); return; }
   }
 }
-function onRoomChange() { checkStart(); renderPeerList(); renderBoard(); if (drawer === 'season' && race.active) renderDrawer(); }
+function onRoomChange() { checkStart(); syncGhosts(); renderPeerList(); renderBoard(); if (drawer === 'season' && race.active) renderDrawer(); }
 async function joinRoom(code) {
   code = String(code).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
   if (!code) return toast('Type a room code first.', 2000);
@@ -1744,18 +1770,25 @@ function resetClaim() {
   for (const s of structures) if (s.kind === 'pump') s.wetOK = waterNear(s.x, s.z, 9) > 0;
   markDirtyAll(); bakeMini();
 }
-function beginRace(startAt, minutes) {
+function beginRace(startAt, minutes, slots) {
   if (!race.active) race.savedT = Object.assign({}, T);
-  race = { active: true, startAt, minutes: [10, 15, 20, 30].includes(minutes) ? minutes : 15, savedT: race.savedT };
+  const clean = {};
+  if (slots && typeof slots === 'object') for (const k in slots) { const v = slots[k]; if (Number.isInteger(v) && v >= 0 && v < SLOTS) clean[String(k).slice(0, 64)] = v; }
+  const me = myPeer();
+  home = me && clean[me] != null ? clean[me] : 0;
+  for (const peer of [...ghosts.keys()]) dropGhost(peer);
+  race = { active: true, startAt, minutes: [10, 15, 20, 30].includes(minutes) ? minutes : 15, savedT: race.savedT, slots: clean };
   Object.assign(T, DEFAULT_T); T.seasonMin = race.minutes;
   resetClaim();
   setSpeed(1);
+  resetNet(); refreshStakes();
   drawer = null; renderDrawer(); renderBoard(); pushPresence();
-  cam.x = -2; cam.z = 22;
 }
 function endRace() {
   if (race.savedT) Object.assign(T, race.savedT);
   race = { active: false, startAt: race.startAt };
+  for (const peer of [...ghosts.keys()]) dropGhost(peer);
+  refreshStakes();
   ledger.over = false; ledger.seasonT = 0;
   drawer = 'race'; renderDrawer(); pushPresence();
 }
@@ -1788,11 +1821,135 @@ function renderRaceDrawer(body, p, h3) {
     for (const m of [10, 15, 20, 30]) { const o = document.createElement('option'); o.value = m; o.textContent = `${m} minutes`; mins.append(o); }
     mins.value = String(mp.minutes);
     mins.addEventListener('change', () => { mp.minutes = +mins.value; pushPresence(); });
-    const start = btn('Start the race for everyone', () => beginRace(Date.now() + 6000, mp.minutes), 'goldbtn'); start.id = 'startBtn';
+    const start = btn('Start the race for everyone', () => beginRace(Date.now() + 6000, mp.minutes, assignSlots()), 'goldbtn'); start.id = 'startBtn';
     body.append(field('One year lasts', mins), p('Starting wipes your current claim. Everyone in the room starts on a fresh claim at the same moment.'),
       (() => { const r = document.createElement('div'); r.className = 'row'; r.append(start, btn('Leave room', leaveRoom)); return r; })());
   }
   renderPeerList();
+}
+
+// =============================================================== shared world (everyone's claims on one map)
+// Each player runs their own claim and machines. Presence carries where Jimbo and the machines are,
+// the buildings, and a rolling chunk of terrain edits; every other page draws those as ghosts.
+const TEAM_COL = { solo: '#6fb1d6', gold: '#e3b448', silver: '#c9ced6' };
+const ghosts = new Map();
+let netT = 0, netSeq = 0, known = Float32Array.from(H), mine = new Set(), pendingNet = new Set(), mineArr = [], mineCur = 0;
+function myPeer() { const me = mp.room && mp.room.peers().find(p => p.sameTab); return me ? me.peer : null; }
+function assignSlots() {
+  const ps = mp.room ? mp.room.peers().filter(p => p.kind === 'viewer') : [];
+  const info = ps.map(p => ({ peer: p.peer, team: p.sameTab ? mp.team : (p.presence && TEAMS[p.presence.team] ? p.presence.team : 'solo') })).sort((a, b) => a.peer < b.peer ? -1 : 1);
+  const out = {}, used = new Set();
+  const gold = info.filter(p => p.team === 'gold'), silver = info.filter(p => p.team === 'silver'), solo = info.filter(p => p.team === 'solo');
+  gold.forEach((p, i) => { out[p.peer] = i; used.add(i); });                 // teammates sit side by side
+  silver.forEach((p, i) => { out[p.peer] = 4 + i; used.add(4 + i); });
+  const n = solo.length;
+  solo.forEach((p, i) => { let k = Math.round(i * SLOTS / Math.max(1, n)) % SLOTS; while (used.has(k)) k = (k + 1) % SLOTS; out[p.peer] = k; used.add(k); });
+  return out;
+}
+function resetNet() { known = Float32Array.from(H); mine = new Set(); pendingNet = new Set(); mineArr = []; mineCur = 0; netBox = null; }
+const enc = k => Math.round(H[k] * 100) * 4 + (loose[k] > 0.05 ? looseKind[k] : 0);
+function netTick() {
+  if (netBox) {
+    const [i0, j0, i1, j1] = netBox; netBox = null;
+    for (let j = Math.max(0, j0 - 1); j <= Math.min(N - 1, j1 + 1); j++) for (let i = Math.max(0, i0 - 1); i <= Math.min(N - 1, i1 + 1); i++) {
+      const k = I(i, j);
+      if (Math.abs(H[k] - known[k]) > 0.01) { known[k] = H[k]; pendingNet.add(k); if (!mine.has(k)) { mine.add(k); mineArr.push(k); } }
+    }
+  }
+  const t = [++netSeq];
+  for (const k of pendingNet) { if (t.length > 300) break; t.push(k, enc(k)); pendingNet.delete(k); }
+  // nothing new: resend old edits a slice at a time so dropped updates and late arrivals catch up
+  while (t.length < 300 && mineArr.length) {
+    if (mineCur >= mineArr.length) { mineArr = [...mine]; mineCur = 0; if (!mineArr.length) break; }
+    const k = mineArr[mineCur++];
+    if (mine.has(k)) t.push(k, enc(k));
+    if (mineCur >= mineArr.length) break;
+  }
+  netChunk = t.length > 1 ? t : null;
+}
+let netChunk = null;
+const r1 = v => Math.round(v * 10) / 10, r2 = v => Math.round(v * 100) / 100;
+function worldState() {
+  const w = {
+    h: home,
+    j: [r1(jim.x), r1(jim.z), r2(jim.yaw), jim.driving ? machines.indexOf(jim.driving) : -1],
+    m: machines.slice(0, 20).map(m => [m.type, r1(m.x), r1(m.z), r2(m.heading), r2(m.swing || 0), r2(m.boom || 0), m.bucketFull || m.cargo > 0 ? 1 : 0]),
+    s: structures.slice(0, 16).map(st => [st.kind, r1(st.x), r1(st.z), r2(st.heading)]),
+  };
+  if (netChunk) w.t = netChunk;
+  return w;
+}
+function applyPatch(t) {
+  applyingRemote = true;
+  for (let n = 1; n + 1 < t.length && n < 700; n += 2) {
+    const k = t[n], v = t[n + 1];
+    if (!Number.isInteger(k) || k < 0 || k >= NN || !Number.isInteger(v)) continue;
+    const kind = ((v % 4) + 4) % 4, h = clamp((v - kind) / 400, -20, 40);
+    if (Math.abs(H[k] - h) < 0.005 && (kind ? loose[k] > 0.05 : true)) continue;
+    H[k] = h; known[k] = h; mine.delete(k);
+    if (kind) { looseKind[k] = kind; loose[k] = Math.max(loose[k], 0.3); } else loose[k] = 0;
+    const i = k % N, j = (k / N) | 0;
+    markDirty(i, j, i, j);
+  }
+  applyingRemote = false;
+}
+const MAKERS = { excavator: makeExcavator, loader: makeLoader, suv: makeSUV };
+const SMAKERS = { plant: makePlant, generator: makeGenerator, pump: makePump, bunkhouse: makeBunkhouse };
+function dropGhost(peer) {
+  const g = ghosts.get(peer);
+  if (!g) return;
+  scene.remove(g.jim); for (const m of g.ms) scene.remove(m.mesh); for (const st of g.ss) scene.remove(st.mesh);
+  ghosts.delete(peer);
+}
+function syncGhosts() {
+  if (!mp.room) return;
+  const seen = new Set();
+  for (const p of mp.room.peers()) {
+    if (p.sameTab || p.kind !== 'viewer') continue;
+    const pr = p.presence || {}, w = pr.w;
+    if (!race.active || !w || typeof w !== 'object' || Number(pr.startAt) !== race.startAt) continue;
+    seen.add(p.peer);
+    let g = ghosts.get(p.peer);
+    if (!g) { g = { jim: makeJimbo(), ms: [], ss: [], seq: null, jx: 0, jz: 0 }; scene.add(g.jim); ghosts.set(p.peer, g); }
+    const num = v => typeof v === 'number' && isFinite(v) ? v : 0;
+    g.nick = String(pr.nick || 'Prospector').slice(0, 16); g.team = TEAMS[pr.team] ? pr.team : 'solo';
+    g.home = Number.isInteger(w.h) ? w.h : null;
+    if (Array.isArray(w.j)) { const first = !g.jt; g.jt = [num(w.j[0]), num(w.j[1]), num(w.j[2])]; g.jd = num(w.j[3]); if (first) { g.jx = g.jt[0]; g.jz = g.jt[1]; } }
+    const ms = Array.isArray(w.m) ? w.m.slice(0, 20).filter(e => Array.isArray(e) && MAKERS[e[0]]) : [];
+    if (ms.length !== g.ms.length || ms.some((e, i) => g.ms[i].type !== e[0])) {
+      for (const m of g.ms) scene.remove(m.mesh);
+      g.ms = ms.map(e => { const mesh = MAKERS[e[0]](); scene.add(mesh); return { type: e[0], mesh, x: num(e[1]), z: num(e[2]), hd: num(e[3]) }; });
+    }
+    ms.forEach((e, i) => Object.assign(g.ms[i], { tx: num(e[1]), tz: num(e[2]), th: num(e[3]), sw: num(e[4]), bm: num(e[5]), load: !!e[6] }));
+    const ss = Array.isArray(w.s) ? w.s.slice(0, 16).filter(e => Array.isArray(e) && SMAKERS[e[0]]) : [];
+    if (ss.length !== g.ss.length || ss.some((e, i) => g.ss[i].kind !== e[0])) {
+      for (const st of g.ss) scene.remove(st.mesh);
+      g.ss = ss.map(e => { const mesh = SMAKERS[e[0]](); scene.add(mesh); return { kind: e[0], mesh, r: STYPE[e[0]].r }; });
+    }
+    ss.forEach((e, i) => { const st = g.ss[i]; st.x = num(e[1]); st.z = num(e[2]); st.mesh.position.set(st.x, hAt(st.x, st.z), st.z); st.mesh.rotation.y = num(e[3]); });
+    if (Array.isArray(w.t) && w.t[0] !== g.seq) { g.seq = w.t[0]; applyPatch(w.t); }
+  }
+  for (const peer of [...ghosts.keys()]) if (!seen.has(peer)) dropGhost(peer);
+  refreshStakes();
+}
+const angLerp = (a, b, t) => a + ((((b - a) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI) * t;
+function ghostTick(dt) {
+  const k = 1 - Math.exp(-8 * dt);
+  for (const g of ghosts.values()) {
+    if (g.jt) { g.jx = lerp(g.jx, g.jt[0], k); g.jz = lerp(g.jz, g.jt[1], k); }
+    g.jim.visible = !!g.jt && g.jd < 0;
+    g.jim.position.set(g.jx, hAt(g.jx, g.jz), g.jz); if (g.jt) g.jim.rotation.y = g.jt[2];
+    for (const m of g.ms) {
+      if (m.tx == null) continue;
+      if (Math.hypot(m.tx - m.x, m.tz - m.z) > 30) { m.x = m.tx; m.z = m.tz; }
+      m.x = lerp(m.x, m.tx, k); m.z = lerp(m.z, m.tz, k); m.hd = angLerp(m.hd, m.th, k);
+      m.mesh.position.set(m.x, hAt(m.x, m.z), m.z); m.mesh.rotation.y = m.hd;
+      const u = m.mesh.userData;
+      if (m.type === 'excavator') { u.house.rotation.y = angLerp(u.house.rotation.y, m.sw, k); u.boom.rotation.x = m.bm; u.load.visible = m.load; }
+      else if (m.type === 'loader') { u.arms.rotation.x = m.load ? -0.45 : 0.15; u.load.visible = m.load; }
+    }
+    if (g.jd >= 0 && g.ms[g.jd]) { g.jx = g.ms[g.jd].x; g.jz = g.ms[g.jd].z; }
+  }
 }
 
 // =============================================================== loop
@@ -1820,6 +1977,9 @@ function frame(now) {
   while (acc > 0) { const d = Math.min(acc, 0.05); step(d); acc -= d; }
   syncMeshes(real * sc);
   updateEffects(real * sc);
+  ghostTick(real);
+  netT -= real;
+  if (netT <= 0) { netT = 0.16; if (race.active) { netTick(); pushPresence(); } }
   flushTerrain();
   const t1 = performance.now();
   placeCamera();
@@ -1839,7 +1999,7 @@ window.addEventListener('resize', resize);
 setupClaim();
 bakeMini();
 for (const s of structures) if (s.kind === 'pump') s.wetOK = waterNear(s.x, s.z, 9) > 0;
-window.__claim = { machines, structures, piles, ledger, T, digAt, jim, TOWN, worldOf };
+window.__claim = { machines, structures, piles, ledger, T, digAt, jim, TOWN, worldOf, ghosts, H, I: (x, z) => I(Math.round(gx(x)), Math.round(gx(z))), get home() { return home; } };
 resize();
 renderStats();
 refreshCmd();
