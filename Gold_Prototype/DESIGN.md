@@ -75,3 +75,16 @@ Long term the real game lives in JJ's Unreal project; this browser build is the 
 - Uses presence only (no event topics), so invited Viewers can play too.
 - Not yet: other players' machines don't block your pathfinding, and selling in town has no contest yet
   (that is step 3, shootouts).
+
+## v6: hero combat (step 3, first part)
+
+Jimbo is the hero unit. Abilities reuse terrain physics, matching the laptop session's advice (no magic):
+- Revolver (Space on foot): auto-aims at the nearest enemy, accuracy falls with distance and dashing
+  targets, terrain and berms block shots. 25 damage, 4 hits to drop someone. Health regenerates slowly.
+- Dash (Shift), 4 s cooldown. Satchel (G): lobbed charge, blows a crater (stops at bedrock), damages
+  everyone within 5.5 m including you, 8 s cooldown. Berm (B): throws up a dirt wall for cover, 9 s cooldown.
+- Down: half your carried gold drops as a sack anyone can grab; you respawn at your claim after 6 s.
+- Bandits: pairs show up near town when you carry more than 3 g; $400 bounty each.
+- Multiplayer: the shooter reports hits, the victim applies them; teammates can't hurt each other.
+  Sack owners grant pickups first come, first served.
+- Next: hire a posse at the saloon, and town control (best gold price for whoever holds it).
