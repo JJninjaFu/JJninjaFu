@@ -137,7 +137,7 @@ body.drivetouch .cmdbar { display: none; }
   <div id="tbtns" hidden>
     <button class="tb alt" id="tbL" type="button" hidden>◀</button>
     <button class="tb alt" id="tbR" type="button" hidden>▶</button>
-    <button class="tb alt" id="tbDash" type="button" hidden>Dash</button>
+    <button class="tb alt" id="tbDash" type="button" hidden>Run</button>
     <button class="tb alt" id="tbBomb" type="button" hidden>Bomb</button>
     <button class="tb alt" id="tbBerm" type="button" hidden>Berm</button>
     <button class="tb alt" id="tbHop" type="button">Hop in</button>
@@ -809,11 +809,13 @@ function updateLedger(dt) {
   }
 }
 function inTown() { return dist(jim.x, jim.z, TOWN.x, TOWN.z) < TOWN.r + 6; }
+function carried() { return jim.carry + (jim.driving && jim.driving.type === 'suv' ? jim.driving.cargoGold : 0); }
 function sellGold() {
-  if (ledger.goldSafe < 0.01) return toast('The safe is empty. Wash some pay dirt first.', 2200);
+  if (carried() < 0.01) return toast(ledger.goldSafe > 0.01 ? 'Load the gold from your claim safe first (Space next to the wash plant), then bring it here.' : 'You are not carrying any gold. Wash some pay dirt first.', 3000);
   if (!inTown()) return toast('Gold sells at the Assay Office in town. Drive the Crew 4x4 up the hill road.', 3200);
-  const v = ledger.goldSafe * ledger.price;
-  ledger.money += v; ledger.earned += v; ledger.goldSold += ledger.goldSafe; ledger.goldSafe = 0;
+  const g = carried(), v = g * ledger.price;
+  ledger.money += v; ledger.earned += v; ledger.goldSold += g; jim.carry = 0;
+  if (jim.driving && jim.driving.type === 'suv') jim.driving.cargoGold = 0;
   sfx('cash', cam.x, cam.z); toast(`Sold gold for ${money(v)}.`, 2400); refreshCmd();
 }
 function step(dt) {
@@ -920,14 +922,22 @@ const ptrs = new Map();
 let pinch = null, mouse = [0, 0];
 glCanvas.addEventListener('contextmenu', e => e.preventDefault());
 glCanvas.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse') { aim.mouse = true; mouse = [e.clientX, e.clientY]; }
+  if (view === 'drive' && e.pointerType === 'mouse' && !jim.driving && !jim.dead && !toolMode && (e.button === 0 || e.button === 2)) {
+    glCanvas.setPointerCapture(e.pointerId);
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, type: 'mouse', btn: e.button, moved: true, fire: true });
+    if (e.button === 0) aim.firing = true; else pressed.add('bomb');
+    return;
+  }
   glCanvas.setPointerCapture(e.pointerId);
   ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, type: e.pointerType, btn: e.button, moved: false });
   if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), ang: Math.atan2(b.y - a.y, b.x - a.x), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 }; for (const p of ptrs.values()) p.moved = true; }
 });
 glCanvas.addEventListener('pointermove', e => {
   mouse = [e.clientX, e.clientY];
+  if (e.pointerType === 'mouse') aim.mouse = true;
   const p = ptrs.get(e.pointerId);
-  if (!p) return;
+  if (!p || p.fire) return;
   const dx = e.clientX - p.x, dy = e.clientY - p.y;
   p.x = e.clientX; p.y = e.clientY;
   if (ptrs.size >= 2 && pinch) {
@@ -944,6 +954,7 @@ glCanvas.addEventListener('pointermove', e => {
 function endPtr(e) {
   const p = ptrs.get(e.pointerId);
   if (!p) return;
+  if (p.fire) { ptrs.delete(e.pointerId); if (p.btn === 0) aim.firing = false; return; }
   ptrs.delete(e.pointerId);
   if (ptrs.size < 2 && !ptrs.size) pinch = null;
   if (!p.moved && e.type === 'pointerup' && ptrs.size === 0) onTap(e.clientX, e.clientY, p.btn);
@@ -959,7 +970,7 @@ window.addEventListener('keydown', e => {
   if (e.key === ' ') { e.preventDefault(); if (view === 'drive') pressed.add('act'); else setSpeed(timeScale ? 0 : 1); }
   if (kk === 'p' && !e.repeat) setSpeed(timeScale ? 0 : 1);
   if ((kk === 'x' || kk === 'f' || e.key === 'Enter') && !e.repeat) pressed.add('hop');
-  if (!e.repeat && view === 'drive') { if (e.key === 'Shift') pressed.add('dash'); if (kk === 'g') pressed.add('bomb'); if (kk === 'b') pressed.add('berm'); }
+  if (!e.repeat && view === 'drive') { if (kk === 'g') pressed.add('bomb'); if (kk === 'b') pressed.add('berm'); }
   if (e.key === 'Tab') { e.preventDefault(); if (!e.repeat) setView(view === 'drive' ? 'boss' : 'drive'); }
   if (e.key === 'Escape') { if (toolMode) setTool(null); else select(null); }
 });
@@ -1068,7 +1079,7 @@ function btn(label, fn, cls) { const b = document.createElement('button'); b.tex
 function renderStats() {
   const left = Math.max(0, T.seasonMin * 60 - ledger.seasonT), mm = Math.floor(left / 60), ss = String(Math.floor(left % 60)).padStart(2, '0');
   const month = Math.min(12, Math.floor(Math.max(0, ledger.seasonT) / (T.seasonMin * 60) * 12) + 1);
-  $('#stats').innerHTML = `<span class="${ledger.money < 0 ? 'neg' : ''}"><b>${money(ledger.money)}</b></span><span>Safe <b>${ledger.goldSafe.toFixed(1)} g</b></span><span>Gold <b>$${ledger.price.toFixed(0)}/g</b></span><span class="${jim.hp < 40 ? 'neg' : ''}">Health <b>${Math.max(0, Math.round(jim.hp))}</b></span><span>Crew <b>${ledger.workers}/${beds()}</b></span><span>Month <b>${month}/12</b></span><span>${race.active ? 'Race' : 'Year'} <b>${mm}:${ss}</b></span>`;
+  $('#stats').innerHTML = `<span class="${ledger.money < 0 ? 'neg' : ''}"><b>${money(ledger.money)}</b></span><span>Safe <b>${ledger.goldSafe.toFixed(1)} g</b></span><span class="${jim.carry > 100 ? 'neg' : ''}">Carrying <b>${jim.carry.toFixed(0)} lb</b></span><span>Gold <b>$${ledger.price.toFixed(0)}/g</b></span><span class="${jim.hp < 40 ? 'neg' : ''}">Health <b>${Math.max(0, Math.round(jim.hp))}</b></span><span>Crew <b>${ledger.workers}/${beds()}</b></span><span>Month <b>${month}/12</b></span><span>${race.active ? 'Race' : 'Year'} <b>${mm}:${ss}</b></span>`;
 }
 let lastCmdSig = '';
 function refreshCmd() {
@@ -1079,7 +1090,7 @@ function refreshCmd() {
   if (sig !== lastCmdSig) { lastCmdSig = sig; $('#cmds').replaceChildren(...frag.children); }
 }
 function buildCmd(info, cmds) {
-  const goldBtn = btn(inTown() ? `Sell gold ${ledger.goldSafe.toFixed(1)} g` : `Gold ${ledger.goldSafe.toFixed(1)} g (sell in town)`, sellGold, inTown() ? 'goldbtn' : '');
+  const goldBtn = btn(inTown() ? `Sell gold ${carried().toFixed(1)} g` : `Carrying ${carried().toFixed(1)} g (sell in town)`, sellGold, inTown() ? 'goldbtn' : '');
   if (jim.driving) {
     const m = jim.driving;
     info.innerHTML = `<b>Driving ${m.name}</b><br><span class="st">${DRIVE_HELP[m.type]}</span>`;
@@ -1237,7 +1248,7 @@ function renderDrawer() {
   } else {
     $('#drawerTitle').textContent = 'How to mine';
     const dl = document.createElement('dl'); dl.className = 'keys';
-    for (const [k, v] of [['Tap', 'Select a machine, building or pile'], ['Tap ground', 'Drive the selected machine there'], ['Dig here', 'Excavator digs that spot down to bedrock'], ['Drag', 'Pan'], ['Pinch', 'Zoom and rotate'], ['Wheel', 'Zoom (mouse)'], ['Tab', 'Switch drive view and boss view'], ['WASD', 'Walk or drive (pan in boss view)'], ['X / F', 'Hop in or out'], ['Space', 'Dig, dump, scoop (pause in boss view)'], ['Q / E', 'Swing the excavator (rotate the view otherwise)'], ['Z / C', 'Rotate the view'], ['Space on foot', 'Shoot the nearest enemy'], ['Shift', 'Dash'], ['G', 'Throw a satchel charge (blows a crater)'], ['B', 'Dig in: throw up a dirt berm for cover'], ['P', 'Pause']]) {
+    for (const [k, v] of [['Tap', 'Select a machine, building or pile'], ['Tap ground', 'Drive the selected machine there'], ['Dig here', 'Excavator digs that spot down to bedrock'], ['Drag', 'Pan'], ['Pinch', 'Zoom and rotate'], ['Wheel', 'Zoom (mouse)'], ['Tab', 'Switch drive view and boss view'], ['WASD', 'Walk or drive (pan in boss view)'], ['X / F', 'Hop in or out'], ['Space', 'Dig, dump, scoop (pause in boss view)'], ['Q / E', 'Swing the excavator (rotate the view otherwise)'], ['Z / C', 'Rotate the view'], ['Mouse', 'Aim where the cursor points; left click fires, right click throws a satchel'], ['Space on foot', 'Shoot (aims for you without a mouse); load gold next to the wash plant'], ['Shift', 'Sprint (not when carrying over 100 lb)'], ['G', 'Throw a satchel charge (blows a crater)'], ['B', 'Dig in: throw up a dirt berm for cover'], ['P', 'Pause']]) {
       const dt = document.createElement('dt'); dt.textContent = k; const dd = document.createElement('dd'); dd.textContent = v; dl.append(dt, dd);
     }
     body.append(dl, h3('The ground'),
@@ -1434,6 +1445,7 @@ blockTown();
 function setView(v) {
   view = v;
   $('#viewBtn').textContent = v === 'drive' ? 'Boss view' : 'Drive view';
+  glCanvas.style.cursor = v === 'drive' ? 'crosshair' : '';
   if (v === 'drive') { cam.size = Math.min(cam.size, 26); select(null); }
   updateTouchUI(); refreshCmd();
 }
@@ -1552,10 +1564,13 @@ function readInput() {
 let wasInTown = false;
 function updatePlayer(dt, live) {
   const inp = readInput();
-  if (!live || jim.dead) { inp.fwd = inp.turn = inp.swing = 0; inp.action = inp.hop = inp.dash = inp.bomb = inp.berm = false; }
+  if (!live || jim.dead) { inp.fwd = inp.turn = inp.swing = 0; inp.action = inp.hop = inp.dash = inp.bomb = inp.berm = false; aim.firing = false; }
+  if (jim.ride) inp.fwd = inp.turn = 0;
+  if (aim.mouse && view === 'drive') aim.pt = aimGround(mouse[0], mouse[1]);
   if (inp.hop) {
-    if (jim.driving) exitMachine();
-    else { const m = nearestMachine(5); if (m) { enterMachine(m); toast(DRIVE_HELP[m.type], 4000); } else toast('Walk up to a machine or the 4x4 to hop in.', 1800); }
+    if (jim.ride) { jim.ride = null; const a = jim.yaw + Math.PI / 2; jim.x += Math.sin(a) * 2.8; jim.z += Math.cos(a) * 2.8; sfx('door', jim.x, jim.z); }
+    else if (jim.driving) exitMachine();
+    else { const m = nearestMachine(5); if (m) { enterMachine(m); toast(DRIVE_HELP[m.type], 4000); } else if (!tryGhostVehicle()) toast('Walk up to a machine or a 4x4 to hop in.', 1800); }
     refreshCmd(); updateTouchUI();
   }
   const m = jim.driving;
@@ -1564,7 +1579,7 @@ function updatePlayer(dt, live) {
     m.y = hAt(m.x, m.z);
     if (m.type === 'excavator') manualExcavator(m, inp, dt);
     else if (m.type === 'loader') { manualLoader(m, inp); m.state = 'You are driving'; if (m.moving) spend(T.fuelLoader * dt); }
-    else { m.state = 'You are driving'; if (inp.action) sfx('horn', m.x, m.z); }
+    else { m.state = m.cargoGold > 0.05 ? `Hauling ${m.cargoGold.toFixed(0)} lb` : 'You are driving'; if (inp.action) { if (nearPlant(m.x, m.z, 6) && ledger.goldSafe > 0.05) { m.cargoGold += ledger.goldSafe; toast(`Loaded ${ledger.goldSafe.toFixed(1)} g (${ledger.goldSafe.toFixed(0)} lb of concentrate) into the 4x4.`, 2400); ledger.goldSafe = 0; sfx('dump', m.x, m.z); } else sfx('horn', m.x, m.z); } }
     if (m.type === 'excavator' && m.moving) spend(T.fuelExc * dt);
     jim.x = m.x; jim.z = m.z;
   } else {
@@ -1573,20 +1588,21 @@ function updatePlayer(dt, live) {
     const mag = Math.hypot(mx, mz);
     if (mag > 0.05) {
       mx /= Math.max(1, mag); mz /= Math.max(1, mag);
-      const sp = jim.dashT > 0 ? 17 : 6, nx = jim.x + mx * sp * dt, nz = jim.z + mz * sp * dt;
+      const sp = (sprinting() ? 11 : 6) * weightFactor(), nx = jim.x + mx * sp * dt, nz = jim.z + mz * sp * dt;
       if (hAt(nx, nz) > WATER_Y - 0.5) { jim.x = nx; jim.z = nz; }
       jim.yaw = Math.atan2(mx, mz); jim.walk += dt * 10;
     }
     pushOut(jim, 0.5);
+    rideTick();
     heroAbilities(inp, dt);
     const legs = jim.mesh.userData.legs;
     legs[0].rotation.x = Math.sin(jim.walk) * 0.5 * Math.min(1, mag); legs[1].rotation.x = -legs[0].rotation.x;
   }
   jim.mesh.visible = !m && !jim.dead;
-  jim.mesh.position.set(jim.x, hAt(jim.x, jim.z), jim.z); jim.mesh.rotation.y = jim.yaw;
+  jim.mesh.position.set(jim.x, hAt(jim.x, jim.z) + (jim.ride ? 1.4 : 0), jim.z); jim.mesh.rotation.y = jim.yaw;
   if (view === 'drive') { const kf = 1 - Math.exp(-5 * dt); cam.x = lerp(cam.x, jim.x, kf); cam.z = lerp(cam.z, jim.z, kf); }
   const it = inTown();
-  if (it && !wasInTown) toast(ledger.goldSafe > 0.05 ? `Welcome to town. The Assay Office will buy your ${ledger.goldSafe.toFixed(1)} g.` : 'Welcome to town. Bring gold to the Assay Office.', 3000);
+  if (it && !wasInTown) toast(carried() > 0.05 ? `Welcome to town. The Assay Office will buy your ${carried().toFixed(1)} g.` : 'Welcome to town. Bring gold to the Assay Office.', 3000);
   wasInTown = it;
 }
 
@@ -1602,7 +1618,7 @@ function updateTouchUI() {
   if (!on) return;
   const m = jim.driving;
   $('#tbHop').textContent = m ? 'Hop out' : 'Hop in';
-  $('#tbAct').hidden = jim.dead; $('#tbAct').textContent = m ? actLabel(m) : 'Shoot';
+  $('#tbAct').hidden = jim.dead; $('#tbAct').textContent = m ? actLabel(m) : ledger.goldSafe > 0.05 && nearPlant(jim.x, jim.z, 4) ? 'Load' : 'Shoot';
   for (const id of ['tbDash', 'tbBomb', 'tbBerm']) $('#' + id).hidden = !!m || jim.dead;
   $('#tbL').hidden = $('#tbR').hidden = !(m && m.type === 'excavator');
 }
@@ -1637,7 +1653,7 @@ function holdBtn(id, down, up) {
 }
 holdBtn('tbAct', () => pressed.add('act'));
 holdBtn('tbHop', () => pressed.add('hop'));
-holdBtn('tbDash', () => pressed.add('dash'));
+holdBtn('tbDash', () => { touchIn.run = true; }, () => { touchIn.run = false; });
 holdBtn('tbBomb', () => pressed.add('bomb'));
 holdBtn('tbBerm', () => pressed.add('berm'));
 holdBtn('tbL', () => { touchIn.swing = 1; }, () => { touchIn.swing = 0; });
@@ -1783,7 +1799,7 @@ function resetClaim() {
   markDirtyAll(); bakeMini();
   for (const f of foes) scene.remove(f.mesh); foes.length = 0;
   for (const l of loots) scene.remove(l.mesh); loots.length = 0;
-  Object.assign(jim, { hp: 100, dead: false }); banditT = 20;
+  Object.assign(jim, { hp: 100, dead: false, carry: 0, ride: null }); banditT = 20;
 }
 function beginRace(startAt, minutes, slots) {
   if (!race.active) race.savedT = Object.assign({}, T);
@@ -1887,8 +1903,8 @@ const r1 = v => Math.round(v * 10) / 10, r2 = v => Math.round(v * 100) / 100;
 function worldState() {
   const w = {
     h: home,
-    j: [r1(jim.x), r1(jim.z), r2(jim.yaw), jim.driving ? machines.indexOf(jim.driving) : -1],
-    m: machines.slice(0, 20).map(m => [m.type, r1(m.x), r1(m.z), r2(m.heading), r2(m.swing || 0), r2(m.boom || 0), m.bucketFull || m.cargo > 0 ? 1 : 0]),
+    j: [r1(jim.x), r1(jim.z), r2(jim.yaw), jim.driving ? machines.indexOf(jim.driving) : jim.ride ? -2 : -1],
+    m: machines.slice(0, 20).map(m => [m.type, r1(m.x), r1(m.z), r2(m.heading), r2(m.swing || 0), r2(m.boom || 0), m.bucketFull || m.cargo > 0 || m.cargoGold > 0.05 ? 1 : 0]),
     s: structures.slice(0, 16).map(st => [st.kind, r1(st.x), r1(st.z), r2(st.heading)]),
   };
   if (netChunk) w.t = netChunk;
@@ -1955,7 +1971,7 @@ function ghostTick(dt) {
   for (const g of ghosts.values()) {
     if (g.jt) { g.jx = lerp(g.jx, g.jt[0], k); g.jz = lerp(g.jz, g.jt[1], k); }
     g.jim.visible = !!g.jt && g.jd < 0 && !(g.hp <= 0);
-    g.jim.position.set(g.jx, hAt(g.jx, g.jz), g.jz); if (g.jt) g.jim.rotation.y = g.jt[2];
+    g.jim.position.set(g.jx, hAt(g.jx, g.jz) + (g.jd === -2 ? 1.4 : 0), g.jz); if (g.jt) g.jim.rotation.y = g.jt[2];
     for (const m of g.ms) {
       if (m.tx == null) continue;
       if (Math.hypot(m.tx - m.x, m.tz - m.z) > 30) { m.x = m.tx; m.z = m.tz; }
@@ -1971,8 +1987,41 @@ function ghostTick(dt) {
 
 // =============================================================== hero combat: revolver, dash, satchel, berm, bandits, loot
 // Jimbo is the hero. Every ability reuses the terrain: satchels blow craters, berms pile dirt, and dirt blocks bullets.
-Object.assign(jim, { hp: 100, dead: false, dashT: 0, cd: { shoot: 0, dash: 0, bomb: 0, berm: 0 }, respawnT: 0 });
-const COOL = { shoot: 0.55, dash: 4, bomb: 8, berm: 9 };
+Object.assign(jim, { hp: 100, dead: false, cd: { shoot: 0, bomb: 0, berm: 0 }, respawnT: 0, carry: 0, ride: null });
+const aim = { mouse: false, firing: false, pt: null };
+function sprinting() { return (keys.has('shift') || touchIn.run) && !jim.driving && !jim.dead && jim.carry <= 100; }
+// gold leaves the plant as heavy black-sand concentrate: about a pound per gram until the Assay Office cleans it
+function weightFactor() { return jim.carry <= 40 ? 1 : Math.max(0.35, 1 - (jim.carry - 40) / 100 * 0.6); }
+// where the cursor meets the ground: march the camera ray down the heightfield (much cheaper than a mesh raycast)
+function aimGround(cx, cy) {
+  setRay(cx, cy);
+  const o = ray.ray.origin, d = ray.ray.direction;
+  if (d.y >= 0) return null;
+  let t = (o.y - 30) / -d.y;
+  for (let n = 0; n < 400; n++, t += 0.6) { const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t; if (y <= hAt(x, z)) return [x, z]; }
+  return null;
+}
+// ride in the back of a teammate's 4x4, or rob an enemy's parked one
+function ghostVehicleNear() {
+  let best = null, bd = 5;
+  for (const [peer, g] of ghosts) g.ms.forEach((m, idx) => { if (m.type !== 'suv') return; const d = dist(m.x, m.z, jim.x, jim.z); if (d < bd) { bd = d; best = { peer, g, m, idx }; } });
+  return best;
+}
+function tryGhostVehicle() {
+  const v = ghostVehicleNear();
+  if (!v) return false;
+  if (mp.team !== 'solo' && v.g.team === mp.team) { jim.ride = { peer: v.peer, idx: v.idx }; toast(`Riding with ${v.g.nick}. Shoot from the back. X hops off.`, 2600); sfx('door', jim.x, jim.z); }
+  else if (v.m.load) { myPicks.push([v.peer, 'v' + v.idx]); toast(`Robbing ${v.g.nick}'s 4x4…`, 1600); }
+  else toast(`${v.g.nick}'s 4x4 has no gold in it.`, 1600);
+  return true;
+}
+function rideTick() {
+  if (!jim.ride) return;
+  const g = ghosts.get(jim.ride.peer), m = g && g.ms[jim.ride.idx];
+  if (!m) { jim.ride = null; toast('Your ride is gone.', 1600); return; }
+  jim.x = m.x; jim.z = m.z;
+}
+const COOL = { shoot: 0.28, bomb: 8, berm: 9 };
 const foes = [], loots = [], bombs = [], tracers = [];
 let shotSeq = 0, lootSeq = 0, banditT = 20;
 const myShots = [], myGrants = [], myPicks = [];
@@ -1998,14 +2047,38 @@ function hostiles() {
   }
   return out;
 }
-function hitChance(d, dashing) { return clamp(0.85 - d * 0.022 - (dashing ? 0.25 : 0), 0.08, 0.9); }
-function shoot() {
+function hitChance(d, dashing) { return clamp(0.9 - d * 0.016 - (dashing ? 0.2 : 0), 0.08, 0.92); }
+// SYNTHETIK-style: with a mouse the bullet goes exactly where the cursor points (plus a little spread);
+// touch keeps an aim assist that picks the nearest enemy.
+function shootAt(ax, az) {
   if (jim.cd.shoot > 0) return;
   jim.cd.shoot = COOL.shoot;
-  const list = hostiles().map(h => ({ ...h, d: dist(h.x, h.z, jim.x, jim.z) })).filter(h => h.d < 26).sort((a, b) => (clearShot(jim.x, jim.z, a.x, a.z) ? 0 : 50) + a.d - ((clearShot(jim.x, jim.z, b.x, b.z) ? 0 : 50) + b.d));
+  const moving = sprinting() ? 0.07 : 0.02, a = Math.atan2(ax - jim.x, az - jim.z) + rand(-moving, moving), dx = Math.sin(a), dz = Math.cos(a);
+  jim.yaw = a;
+  const x0 = jim.x + dx * 0.6, z0 = jim.z + dz * 0.6, y0 = hAt(jim.x, jim.z) + 1.6;
+  let best = null, bestT = 40;
+  for (const h of hostiles()) {
+    const rx = h.x - x0, rz = h.z - z0, t = rx * dx + rz * dz, perp = Math.abs(rx * dz - rz * dx);
+    if (t > 0 && t < bestT && perp < 0.55) { best = h; bestT = t; }
+  }
+  // where does the bullet hit dirt first?
+  let endT = best ? bestT : 40;
+  for (let t = 1; t < endT; t += CELL * 0.6) if (hAt(x0 + dx * t, z0 + dz * t) > y0 - 0.45 - t * 0.012) { endT = t; best = null; break; }
+  sfx('shot', jim.x, jim.z);
+  const ex = x0 + dx * endT, ez = z0 + dz * endT;
+  tracer(x0, y0, z0, ex, hAt(ex, ez) + 1.2, ez);
+  if (!best) { puff(dustTex, ex, hAt(ex, ez) + 0.5, ez, 1, 0.5, 0.3); return; }
+  if (best.kind === 'bandit') hurtBandit(best.ref, 25);
+  else myShots.push([++shotSeq, best.peer, 25]);
+}
+function shoot() {
+  if (aim.mouse && aim.pt) return shootAt(aim.pt[0], aim.pt[1]);
+  if (jim.cd.shoot > 0) return;
+  jim.cd.shoot = COOL.shoot;
+  const list = hostiles().map(h => ({ ...h, d: dist(h.x, h.z, jim.x, jim.z) })).filter(h => h.d < 40).sort((a, b) => (clearShot(jim.x, jim.z, a.x, a.z) ? 0 : 50) + a.d - ((clearShot(jim.x, jim.z, b.x, b.z) ? 0 : 50) + b.d));
   const tg = list[0], y0 = hAt(jim.x, jim.z) + 1.6;
   sfx('shot', jim.x, jim.z);
-  if (!tg) { const ex = jim.x + Math.sin(jim.yaw) * 20, ez = jim.z + Math.cos(jim.yaw) * 20; tracer(jim.x, y0, jim.z, ex, hAt(ex, ez) + 1.2, ez); return; }
+  if (!tg) { const ex = jim.x + Math.sin(jim.yaw) * 30, ez = jim.z + Math.cos(jim.yaw) * 30; tracer(jim.x, y0, jim.z, ex, hAt(ex, ez) + 1.2, ez); return; }
   jim.yaw = Math.atan2(tg.x - jim.x, tg.z - jim.z);
   const open = clearShot(jim.x, jim.z, tg.x, tg.z), hit = open && Math.random() < hitChance(tg.d, tg.dash);
   const spread = hit ? 0 : 1.5;
@@ -2023,10 +2096,10 @@ function hurtMe(dmg, why) {
   if (jim.dead) return;
   jim.hp -= dmg; sfx('hurt', jim.x, jim.z);
   if (jim.hp > 0) return;
-  jim.dead = true; jim.respawnT = 6;
+  jim.dead = true; jim.respawnT = 6; jim.ride = null;
   if (jim.driving) exitMachine();
-  const g = ledger.goldSafe * 0.5;
-  if (g > 0.05) { ledger.goldSafe -= g; dropLoot(jim.x, jim.z, g); }
+  const g = jim.carry * 0.5;
+  if (g > 0.05) { jim.carry -= g; dropLoot(jim.x, jim.z, g); }
   toast(`${why || 'You got shot'}. ${g > 0.05 ? `You dropped ${g.toFixed(1)} g. ` : ''}Back at your claim in 6 seconds.`, 4000);
   updateTouchUI(); refreshCmd();
 }
@@ -2037,14 +2110,17 @@ function dropLoot(x, z, g) {
   loots.push({ id: ++lootSeq, x, z, g, mesh, own: true });
 }
 function heroAbilities(inp, dt) {
-  if (inp.action) shoot();
-  if (inp.dash) { if (jim.cd.dash > 0) toast(`Dash ready in ${jim.cd.dash.toFixed(0)} s.`, 900); else { jim.dashT = 0.35; jim.cd.dash = COOL.dash; sfx('dig', jim.x, jim.z); } }
+  if (aim.mouse && aim.pt) jim.yaw = Math.atan2(aim.pt[0] - jim.x, aim.pt[1] - jim.z);
+  const loadable = ledger.goldSafe > 0.05 && nearPlant(jim.x, jim.z, 4) && !hostiles().some(h => dist(h.x, h.z, jim.x, jim.z) < 30);
+  if (inp.action && loadable) { jim.carry += ledger.goldSafe; toast(`Loaded ${ledger.goldSafe.toFixed(1)} g. That is ${jim.carry.toFixed(0)} lb with the black-sand concentrate. ${jim.carry > 40 ? 'Heavy: the 4x4 carries it easier.' : ''}`, 3200); ledger.goldSafe = 0; sfx('dump', jim.x, jim.z); }
+  else if (inp.action || aim.firing) shoot();
   if (inp.bomb) {
     if (jim.cd.bomb > 0) toast(`Satchel ready in ${jim.cd.bomb.toFixed(0)} s.`, 900);
     else {
       jim.cd.bomb = COOL.bomb;
       const tg = hostiles().map(h => ({ ...h, d: dist(h.x, h.z, jim.x, jim.z) })).filter(h => h.d < 18).sort((a, b) => a.d - b.d)[0];
-      const tx = tg ? tg.x : jim.x + Math.sin(jim.yaw) * 12, tz = tg ? tg.z : jim.z + Math.cos(jim.yaw) * 12;
+      let tx = tg ? tg.x : jim.x + Math.sin(jim.yaw) * 12, tz = tg ? tg.z : jim.z + Math.cos(jim.yaw) * 12;
+      if (aim.mouse && aim.pt) { const d = Math.min(20, dist(aim.pt[0], aim.pt[1], jim.x, jim.z)), a = Math.atan2(aim.pt[0] - jim.x, aim.pt[1] - jim.z); tx = jim.x + Math.sin(a) * d; tz = jim.z + Math.cos(a) * d; }
       const mesh = add(scene, box(0.4, 0.3, 0.3), M(0x6b2a1a), jim.x, hAt(jim.x, jim.z) + 1.5, jim.z);
       bombs.push({ x0: jim.x, z0: jim.z, x1: tx, z1: tz, t: 0, T: 0.9, mesh });
     }
@@ -2083,13 +2159,12 @@ function spawnBandits() {
     scene.add(mesh);
     foes.push({ x, z, hp: 75, yaw: 0, cool: rand(1, 2), mesh, walk: 0 });
   }
-  toast('Bandits! They want your gold. Space shoots, Shift dashes, G throws a satchel, B digs in.', 4500);
+  toast('Bandits! They want your gold. Click to shoot, Shift sprints, right click or G throws a satchel, B digs in.', 4500);
 }
 function combatTick(dt) {
   for (const t of tracers) if (t.t > 0) { t.t -= 1 / 60; if (t.t <= 0) t.line.visible = false; }
   if (!dt) return;
   for (const k in jim.cd) jim.cd[k] = Math.max(0, jim.cd[k] - dt);
-  jim.dashT = Math.max(0, jim.dashT - dt);
   if (jim.dead) {
     jim.respawnT -= dt;
     if (jim.respawnT <= 0) { const [x, z] = worldOf(home, -30, -11); Object.assign(jim, { x, z, hp: 100, dead: false }); cam.x = x; cam.z = z; updateTouchUI(); refreshCmd(); }
@@ -2104,17 +2179,19 @@ function combatTick(dt) {
   // bandits show up when you carry gold near town
   const nearTown = dist(jim.x, jim.z, 0, 0) < 80;
   if (!foes.some(f => f.hp > 0)) banditT -= dt;
-  if (banditT <= 0 && nearTown && ledger.goldSafe > 3 && !jim.dead) { banditT = 75; spawnBandits(); }
+  if (banditT <= 0 && nearTown && carried() > 3 && !jim.dead) { banditT = 75; spawnBandits(); }
   for (let n = foes.length - 1; n >= 0; n--) {
     const f = foes[n];
     if (f.hp <= 0) { f.dead = (f.dead || 0) + dt; if (f.dead > 8) { scene.remove(f.mesh); foes.splice(n, 1); } continue; }
     const d = dist(f.x, f.z, jim.x, jim.z);
     f.yaw = Math.atan2(jim.x - f.x, jim.z - f.z);
-    if (!jim.dead && (d > 13 || !clearShot(f.x, f.z, jim.x, jim.z))) { f.x += Math.sin(f.yaw) * 4.5 * dt; f.z += Math.cos(f.yaw) * 4.5 * dt; f.walk += dt * 9; pushOut(f, 0.5); }
+    f.strafeT = (f.strafeT || 0) - dt; if (f.strafeT <= 0) { f.strafeT = rand(0.8, 1.8); f.side = Math.random() < 0.5 ? -1 : 1; }
+    const adv = !jim.dead && (d > 18 || !clearShot(f.x, f.z, jim.x, jim.z)) ? 1 : d < 10 ? -0.6 : 0;
+    if (!jim.dead) { const sx = Math.cos(f.yaw) * f.side, sz = -Math.sin(f.yaw) * f.side; f.x += (Math.sin(f.yaw) * adv * 4.5 + sx * 3) * dt; f.z += (Math.cos(f.yaw) * adv * 4.5 + sz * 3) * dt; f.walk += dt * 9; pushOut(f, 0.5); }
     f.cool -= dt;
-    if (f.cool <= 0 && !jim.dead && d < 22) {
-      f.cool = rand(1.2, 1.9);
-      const open = clearShot(f.x, f.z, jim.x, jim.z), hit = open && Math.random() < hitChance(d, jim.dashT > 0) * 0.55;
+    if (f.cool <= 0 && !jim.dead && d < 32) {
+      f.cool = rand(0.9, 1.5);
+      const open = clearShot(f.x, f.z, jim.x, jim.z), hit = open && Math.random() < hitChance(d, sprinting()) * 0.55;
       sfx('shot', f.x, f.z);
       tracer(f.x, hAt(f.x, f.z) + 1.6, f.z, jim.x + (hit ? 0 : rand(-1.5, 1.5)), hAt(jim.x, jim.z) + 1.2, jim.z + (hit ? 0 : rand(-1.5, 1.5)));
       if (hit) hurtMe(14, 'A bandit got you');
@@ -2128,7 +2205,7 @@ function combatTick(dt) {
     const l = loots[n];
     l.mesh.rotation.y += dt;
     if (jim.dead || dist(l.x, l.z, jim.x, jim.z) > 2.2) continue;
-    if (l.own) { ledger.goldSafe += l.g; scene.remove(l.mesh); loots.splice(n, 1); toast(`Picked up ${l.g.toFixed(1)} g.`, 1600); sfx('ding', jim.x, jim.z); }
+    if (l.own) { jim.carry += l.g; scene.remove(l.mesh); loots.splice(n, 1); toast(`Picked up ${l.g.toFixed(1)} g.`, 1600); sfx('ding', jim.x, jim.z); }
     else if (!myPicks.some(p => p[0] === l.peer && p[1] === l.id)) myPicks.push([l.peer, l.id]);
   }
 }
@@ -2137,7 +2214,7 @@ function combatState() {
   while (myShots.length > 8) myShots.shift();
   while (myGrants.length > 8) myGrants.shift();
   while (myPicks.length > 6) myPicks.shift();
-  return { hp: Math.round(jim.dead ? 0 : jim.hp), d: jim.dashT > 0 ? 1 : 0, sh: myShots.slice(), lt: loots.filter(l => l.own).slice(0, 8).map(l => [l.id, r1(l.x), r1(l.z), r1(l.g)]), gv: myGrants.slice(), pk: myPicks.slice() };
+  return { hp: Math.round(jim.dead ? 0 : jim.hp), d: sprinting() ? 1 : 0, sh: myShots.slice(), lt: loots.filter(l => l.own).slice(0, 8).map(l => [l.id, r1(l.x), r1(l.z), r1(l.g)]), gv: myGrants.slice(), pk: myPicks.slice() };
 }
 function readGhostCombat(peer, g, c, num) {
   if (!c || typeof c !== 'object') return;
@@ -2163,11 +2240,18 @@ function readGhostCombat(peer, g, c, num) {
   g.seenGrants = g.seenGrants || new Set();
   for (const gr of Array.isArray(c.gv) ? c.gv : []) {
     if (!Array.isArray(gr) || gr[1] !== me || g.seenGrants.has(gr[0])) continue;
-    g.seenGrants.add(gr[0]); ledger.goldSafe += clamp(num(gr[2]), 0, 1e4); toast(`Grabbed ${num(gr[2]).toFixed(1)} g from ${g.nick}.`, 2000); sfx('ding', jim.x, jim.z);
+    g.seenGrants.add(gr[0]); jim.carry += clamp(num(gr[2]), 0, 1e4); toast(`Grabbed ${num(gr[2]).toFixed(1)} g from ${g.nick}.`, 2000); sfx('ding', jim.x, jim.z);
   }
   // they want one of ours: first come, first served
   for (const pk of Array.isArray(c.pk) ? c.pk : []) {
     if (!Array.isArray(pk) || pk[0] !== me) continue;
+    if (typeof pk[1] === 'string' && pk[1][0] === 'v') {
+      const m = machines[+pk[1].slice(1)];
+      if (m && m.type === 'suv' && m.cargoGold > 0.05 && jim.driving !== m && g.jt && dist(g.jx, g.jz, m.x, m.z) < 8) {
+        myGrants.push(['v' + (++lootSeq), peer, r1(m.cargoGold)]); toast(`${g.nick} robbed ${m.cargoGold.toFixed(1)} g out of your 4x4!`, 3000); m.cargoGold = 0;
+      }
+      continue;
+    }
     const n = loots.findIndex(l => l.own && l.id === pk[1]);
     if (n < 0) continue;
     const L = loots[n]; scene.remove(L.mesh); loots.splice(n, 1); myGrants.push([L.id, peer, r1(L.g)]);
@@ -2222,7 +2306,7 @@ window.addEventListener('resize', resize);
 setupClaim();
 bakeMini();
 for (const s of structures) if (s.kind === 'pump') s.wetOK = waterNear(s.x, s.z, 9) > 0;
-window.__claim = { machines, structures, piles, ledger, T, digAt, jim, TOWN, worldOf, ghosts, H, I: (x, z) => I(Math.round(gx(x)), Math.round(gx(z))), get home() { return home; }, foes, loots, hurtMe, setBanditT: v => { banditT = v; } };
+window.__claim = { machines, structures, piles, ledger, T, digAt, jim, TOWN, worldOf, ghosts, H, I: (x, z) => I(Math.round(gx(x)), Math.round(gx(z))), get home() { return home; }, foes, loots, hurtMe, toScreen, aim, setBanditT: v => { banditT = v; } };
 resize();
 renderStats();
 refreshCmd();

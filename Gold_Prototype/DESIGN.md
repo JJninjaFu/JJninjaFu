@@ -88,3 +88,17 @@ Jimbo is the hero unit. Abilities reuse terrain physics, matching the laptop ses
 - Multiplayer: the shooter reports hits, the victim applies them; teammates can't hurt each other.
   Sack owners grant pickups first come, first served.
 - Next: hire a posse at the saloon, and town control (best gold price for whoever holds it).
+
+## v7: twitch combat and heavy gold (JJ's notes)
+
+- Aim is SYNTHETIK-style with a mouse: Jimbo faces the cursor, left click (hold) fires exactly along that line
+  with a little spread (more while sprinting), right click throws the satchel at the cursor (20 m max).
+  Touch keeps aim assist. Fire rate 0.28 s, range 40 m. Dirt and berms stop bullets.
+- Sprint: hold Shift (or Run on touch), no cooldown. Not possible above 100 lb.
+- Gold has weight: the plant fills the claim safe; Space next to the plant loads it onto Jimbo, or into the
+  4x4 while driving it. About 1 lb per gram (black-sand concentrate until the Assay Office cleans it).
+  Jimbo slows above 40 lb. Only carried gold sells, and only in town. Death drops half of what Jimbo carries.
+- 4x4: anyone not on your team can rob gold out of a 4x4 nobody is driving (X next to it).
+  Teammates can ride in the back (X next to it) and shoot while their buddy drives.
+- Bandits strafe, shoot from 32 m, and fire faster.
+- Later: hire employees to run gold routes in the 4x4 (and protect them).
