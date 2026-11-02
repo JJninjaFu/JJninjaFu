@@ -109,4 +109,5 @@ Jimbo is the hero unit. Abilities reuse terrain physics, matching the laptop ses
 - Blade down while moving: cuts ground that sits above the tracks (8 cm below them, never past bedrock),
   carries up to 6 m³, fills ground that dips below the tracks from that load, spills extra ahead as a pile.
   Lifting the blade dumps the load. That pushes overburden, fills pits and builds ramps.
-- Dozed material becomes waste: gold in pay gravel you doze is lost (let the excavator handle pay dirt).
+- JJ: dozing should never destroy gold. The blade cuts no deeper than the top of the pay gravel and never
+  pushes pay piles; it strips overburden and moves waste/fill only (that is also how real placer mines use dozers).

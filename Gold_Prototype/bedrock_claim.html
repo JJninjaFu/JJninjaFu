@@ -1221,7 +1221,7 @@ function renderDrawer() {
     $('#drawerTitle').textContent = 'Equipment dealer';
     body.append(p(`You have ${money(ledger.money)}. Machines arrive at the dealer in town and drive down to your claim. Buildings: tap to place.`), h3('Machines'),
       shopItem('Excavator', PRICES.excavator, 'Digs a site layer by layer and sorts waste from pay dirt.', () => deliver('excavator')),
-      shopItem('Dozer', PRICES.dozer, 'Pushes dirt with its blade: clears overburden, fills pits, builds ramps. Drive it yourself.', () => deliver('dozer')),
+      shopItem('Dozer', PRICES.dozer, 'Strips overburden down to the pay gravel, fills pits, builds ramps. Never wastes gold. Drive it yourself.', () => deliver('dozer')),
       shopItem('Loader', PRICES.loader, 'Hauls pay dirt from piles to the wash plant hopper.', () => deliver('loader')),
       h3('Buildings'),
       shopItem('Water pump', PRICES.pump, 'Place within 9 m of water. 60 water units.', () => setTool('build:pump')),
@@ -1410,7 +1410,7 @@ let view = 'drive';
 const pressed = new Set(), touchIn = { lx: 0, ly: 0, swing: 0, on: false };
 const DRIVE = { suv: { max: 11, acc: 7, brake: 11, turn: 2.0, tracked: false, r: 2.0 }, loader: { max: 6, acc: 6, brake: 9, turn: 1.8, tracked: false, r: 1.9 }, excavator: { max: 2.6, acc: 3, brake: 6, turn: 1.0, tracked: true, r: 2.4 }, dozer: { max: 3.4, acc: 3.5, brake: 7, turn: 1.1, tracked: true, r: 2.3 } };
 const DRIVE_HELP = {
-  dozer: 'WASD drives. Space drops or lifts the blade. Blade down cuts the ground ahead and carries the dirt; drive over a hole or down a slope to fill it, and build ramps. Lifting the blade dumps the load. Careful: pay gravel you doze loses its gold.',
+  dozer: 'WASD drives. Space drops or lifts the blade. Blade down cuts the ground ahead and carries the dirt; drive over a hole or down a slope to fill it, and build ramps. Lifting the blade dumps the load. The blade stops at pay gravel and leaves pay piles alone, so no gold is ever wasted.',
   suv: 'WASD or the stick drives. Take the hill road to town to sell gold. Space honks.',
   excavator: 'WASD drives the tracks, Q/E (or ◀ ▶) swings, Space digs and dumps. Dumps sort themselves into pay dirt or waste piles. Dump next to the wash plant to fill its hopper.',
   loader: 'Space scoops from a pile in front of you, then dumps. Dump at the wash plant to feed the hopper.',
@@ -1530,6 +1530,7 @@ function manualDozer(m, inp, dt) {
   if (m.moving) spend(T.fuelExc * dt);
   if (!m.bladeDown || m.speed < 0.15) return;
   const base = hAt(m.x, m.z) - 0.08, stepLen = m.speed * dt, cellA = CELL * CELL, done = new Set();
+  let atPay = false;
   for (let sd = -1.6; sd <= 1.61; sd += CELL * 0.7) {
     const [i, j] = cellOf(m.x + fx * 2.7 + rx * sd, m.z + fz * 2.7 + rz * sd);
     if (i < 1 || j < 1 || i > N - 2 || j > N - 2) continue;
@@ -1537,13 +1538,19 @@ function manualDozer(m, inp, dt) {
     if (done.has(k)) continue;
     done.add(k);
     if (H[k] > base) {
-      const cut = Math.min(H[k] - Math.max(base, BEDR[k]), 0.6 * stepLen);
+      // the blade strips overburden and moves waste, but stops at pay gravel and never pushes pay piles,
+      // so dozing can't waste gold (pay dirt is the excavator's job)
+      const lk = loose[k] > 0.02 ? looseKind[k] : 0;
+      const floor = lk === 2 ? H[k] : Math.max(base, BEDR[k], Math.min(PAYTOP[k], H[k] - (lk ? loose[k] : 0)));
+      if (floor > base + 0.05) atPay = true;
+      const cut = Math.min(H[k] - floor, 0.6 * stepLen);
       if (cut > 0) { H[k] -= cut; loose[k] = Math.max(0, loose[k] - cut); m.load += cut * cellA; }
     } else if (m.load > 0.01) {
       const fill = Math.min(base - H[k], 0.6 * stepLen, m.load / cellA);
       H[k] += fill; loose[k] += fill; looseKind[k] = 1; m.load -= fill * cellA;
     }
   }
+  if (atPay) hintOnce('paytop', 'The blade stops at pay gravel so no gold gets wasted. Dig the pay dirt with the excavator.');
   if (m.load > 6) { deposit(m.x + fx * 4, m.z + fz * 4, m.load - 6, 1); m.load = 6; }
   const [i0, j0, i1, j1] = cellBox(m.x + fx * 2.7, m.z + fz * 2.7, 2.2);
   markDirty(i0, j0, i1, j1);
@@ -2358,7 +2365,7 @@ window.addEventListener('resize', resize);
 setupClaim();
 bakeMini();
 for (const s of structures) if (s.kind === 'pump') s.wetOK = waterNear(s.x, s.z, 9) > 0;
-window.__claim = { machines, structures, piles, ledger, T, digAt, jim, TOWN, worldOf, ghosts, H, I: (x, z) => I(Math.round(gx(x)), Math.round(gx(z))), get home() { return home; }, foes, loots, hurtMe, toScreen, aim, setBanditT: v => { banditT = v; } };
+window.__claim = { machines, structures, piles, ledger, T, digAt, jim, TOWN, worldOf, ghosts, H, I: (x, z) => I(Math.round(gx(x)), Math.round(gx(z))), get home() { return home; }, foes, loots, hurtMe, toScreen, aim, paytop: k => PAYTOP[k], setBanditT: v => { banditT = v; } };
 resize();
 renderStats();
 refreshCmd();
