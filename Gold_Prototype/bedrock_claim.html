@@ -1057,6 +1057,7 @@ function drawHUD() {
     const s = toScreen(TOWN.x + dx, hAt(TOWN.x, TOWN.z) + 6.5, TOWN.z + dz);
     if (s) badge(c, s[0], s[1], label, sub, '#e3b448', false);
   }
+  for (const o of outfits) { const tr = o.convoy && o.convoy.truck; if (!tr || tr.hp <= 0) continue; const s = toScreen(tr.x, hAt(tr.x, tr.z) + 4, tr.z); if (s) badge(c, s[0], s[1], `${o.name} convoy`, tr.cargo > 0.05 ? `${tr.cargo.toFixed(0)} g aboard` : 'Heading home', o.css, false); }
   for (const g of ghosts.values()) {
     if (!g.jt) continue;
     const s = toScreen(g.jx, hAt(g.jx, g.jz) + (g.jd >= 0 ? 4.6 : 3.4), g.jz);
@@ -1257,7 +1258,7 @@ function renderDrawer() {
         (() => { const r = document.createElement('div'); r.className = 'row'; r.append(btn('Back to the lobby', endRace)); return r; })());
       return;
     }
-    body.append(p(worth >= 25000 ? 'The claim paid. The bank is happy.' : 'The claim lost money this season.'), tbl,
+    body.append(p(worth >= 25000 ? 'The claim paid. The bank is happy.' : 'The claim lost money this season.'), tbl, h3('Gold sold this year'), p(`You: ${ledger.goldSold.toFixed(1)} g. ` + outfits.map(o => `${o.name}: ${o.sold.toFixed(1)} g`).join('. ') + '.'),
       (() => { const r = document.createElement('div'); r.className = 'row'; r.append(btn('Keep digging', () => { ledger.seasonT = -1e9; drawer = null; renderDrawer(); setSpeed(1); }), btn('New claim', () => location.reload(), 'warn')); return r; })());
   } else if (drawer === 'race') {
     renderRaceDrawer(body, p, h3);
@@ -1446,6 +1447,7 @@ const stakeMeshes = [];
 function refreshStakes() {
   const taken = new Set([home]);
   for (const g of ghosts.values()) if (g.home != null) taken.add(g.home);
+  for (const o of outfits) taken.add(o.slot);
   stakeMeshes.forEach((g, k) => { g.visible = !taken.has(k); });
 }
 for (let k = 0; k < SLOTS; k++) {
@@ -1746,7 +1748,7 @@ function pushPresence() {
 }
 function mpPlayers() {
   const mine = { nick: mp.nick, team: mp.team, gold: ledger.goldWashed, phase: myPhase(), me: true };
-  if (!mp.room) return [mine];
+  if (!mp.room) return [mine, ...outfits.map(o => ({ nick: o.name, team: 'solo', gold: o.sold, phase: 'race', me: false, ai: true }))];
   return mp.room.peers().filter(p => p.kind === 'viewer').map(p => {
     if (p.sameTab) return mine;
     const pr = p.presence || {}, g = Number(pr.gold);
@@ -1786,6 +1788,8 @@ function drawMini() {
   c.drawImage(miniBg, 0, 0);
   for (let k = 0; k < SLOTS; k++) { const [x, z] = P(...worldOf(k, -20, 8)); if (k !== home && !stakeMeshes[k].visible) continue; c.fillStyle = k === home ? '#e3b448' : '#d4574a'; c.fillRect(x - 3, z - 3, 6, 6); }
   for (const g of ghosts.values()) { if (!g.jt) continue; const [x, z] = P(g.jt[0], g.jt[1]); c.fillStyle = TEAM_COL[g.team]; c.beginPath(); c.arc(x, z, 3, 0, 7); c.fill(); }
+  for (const o of outfits) { const [cx, cz] = P(...worldOf(o.slot, -20, 8)); c.fillStyle = o.css; c.fillRect(cx - 3, cz - 3, 6, 6); }
+  for (const u of aiUnits()) { const [x, z] = P(u.x, u.z); c.fillStyle = u.o.css; c.fillRect(x - (u.kind === 'truck' ? 2.5 : 1.5), z - (u.kind === 'truck' ? 2.5 : 1.5), u.kind === 'truck' ? 5 : 3, u.kind === 'truck' ? 5 : 3); }
   const [tx, tz] = P(TOWN.x, TOWN.z); c.strokeStyle = '#efe5cf'; c.lineWidth = 1.5; c.beginPath(); c.arc(tx, tz, TOWN.r * sc, 0, 7); c.stroke();
   for (const m of machines) { const [x, z] = P(m.x, m.z); c.fillStyle = m.type === 'suv' ? '#c4a86e' : '#f2c230'; c.fillRect(x - 1.5, z - 1.5, 3, 3); }
   const [jx, jz] = P(jim.x, jim.z); c.fillStyle = '#ffffff'; c.beginPath(); c.arc(jx, jz, 3, 0, 7); c.fill();
@@ -1797,7 +1801,7 @@ $('#mini').addEventListener('click', e => {
 });
 function renderBoard() {
   const el = $('#board');
-  if (!mp.room && !race.active) { el.hidden = true; return; }
+  if (!mp.room && !race.active && !outfits.length) { el.hidden = true; return; }
   el.hidden = false; el.textContent = '';
   mpPlayers().sort((a, b) => b.gold - a.gold).slice(0, 4).forEach((r, i) => {
     const d = document.createElement('div');
@@ -1867,6 +1871,7 @@ function beginRace(startAt, minutes, slots) {
   for (const peer of [...ghosts.keys()]) dropGhost(peer);
   race = { active: true, startAt, minutes: [10, 15, 20, 30].includes(minutes) ? minutes : 15, savedT: race.savedT, slots: clean };
   Object.assign(T, DEFAULT_T); T.seasonMin = race.minutes;
+  clearOutfits();
   resetClaim();
   setSpeed(1);
   resetNet(); refreshStakes();
@@ -1875,6 +1880,7 @@ function beginRace(startAt, minutes, slots) {
 function endRace() {
   if (race.savedT) Object.assign(T, race.savedT);
   race = { active: false, startAt: race.startAt };
+  makeOutfits();
   for (const peer of [...ghosts.keys()]) dropGhost(peer);
   refreshStakes();
   ledger.over = false; ledger.seasonT = 0;
@@ -2098,6 +2104,7 @@ function clearShot(ax, az, bx, bz) {
 function hostiles() {
   const out = [];
   for (const f of foes) if (f.hp > 0) out.push({ kind: 'bandit', ref: f, x: f.x, z: f.z, dash: false });
+  for (const u of aiUnits()) out.push({ kind: 'ai', ref: u, x: u.x, z: u.z, dash: false, r: u.kind === 'truck' ? 1.3 : 0.55 });
   for (const [peer, g] of ghosts) {
     if (!g.jt || g.hp <= 0 || (mp.team !== 'solo' && g.team === mp.team)) continue;
     const mx = g.jd >= 0 && g.ms[g.jd] ? g.ms[g.jd] : null;
@@ -2117,7 +2124,7 @@ function shootAt(ax, az) {
   let best = null, bestT = 40;
   for (const h of hostiles()) {
     const rx = h.x - x0, rz = h.z - z0, t = rx * dx + rz * dz, perp = Math.abs(rx * dz - rz * dx);
-    if (t > 0 && t < bestT && perp < 0.55) { best = h; bestT = t; }
+    if (t > 0 && t < bestT && perp < (h.r || 0.55)) { best = h; bestT = t; }
   }
   // where does the bullet hit dirt first?
   let endT = best ? bestT : 40;
@@ -2127,6 +2134,7 @@ function shootAt(ax, az) {
   tracer(x0, y0, z0, ex, hAt(ex, ez) + 1.2, ez);
   if (!best) { puff(dustTex, ex, hAt(ex, ez) + 0.5, ez, 1, 0.5, 0.3); return; }
   if (best.kind === 'bandit') hurtBandit(best.ref, 25);
+  else if (best.kind === 'ai') hurtUnit(best.ref, 25, null);
   else myShots.push([++shotSeq, best.peer, 25]);
 }
 function shoot() {
@@ -2144,6 +2152,7 @@ function shoot() {
   if (!open) puff(dustTex, lerp(jim.x, tg.x, 0.6), hAt(lerp(jim.x, tg.x, 0.6), lerp(jim.z, tg.z, 0.6)) + 0.8, lerp(jim.z, tg.z, 0.6), 1.2, 0.6, 0.4);
   if (!hit) return;
   if (tg.kind === 'bandit') hurtBandit(tg.ref, 25);
+  else if (tg.kind === 'ai') hurtUnit(tg.ref, 25, null);
   else myShots.push([++shotSeq, tg.peer, 25]);
 }
 function hurtBandit(f, dmg) {
@@ -2206,6 +2215,7 @@ function blast(x, z) {
   puff(sparkTex, x, hAt(x, z) + 1.5, z, 7, 0.35, 0, true);
   for (let n = 0; n < 7; n++) puff(smokeTex, x + rand(-2, 2), hAt(x, z) + rand(1, 3), z + rand(-2, 2), rand(4, 6), rand(2, 3.5), rand(0.6, 1.4));
   for (const f of foes) if (f.hp > 0) { const d = dist(f.x, f.z, x, z); if (d < 5.5) hurtBandit(f, 90 * (1 - d / 5.5)); }
+  for (const u of aiUnits()) { const d = dist(u.x, u.z, x, z); if (d < 5.5) hurtUnit(u, 90 * (1 - d / 5.5), null); }
   for (const h of hostiles()) if (h.kind === 'player') { const d = dist(h.x, h.z, x, z); if (d < 5.5) myShots.push([++shotSeq, h.peer, Math.round(90 * (1 - d / 5.5))]); }
   const dm = dist(jim.x, jim.z, x, z);
   if (dm < 5.5) hurtMe(90 * (1 - dm / 5.5), 'Caught in your own blast');
@@ -2316,6 +2326,123 @@ function readGhostCombat(peer, g, c, num) {
   }
 }
 
+// =============================================================== rival outfits: AI crews that mine, convoy gold to town, and fight
+// Solo only for now: in a shared race every player would simulate different AI.
+const OUTFIT_DEFS = [{ name: 'McCready Outfit', color: 0x8a3324, css: '#c0563f', off: 3 }, { name: 'Dutch Hollow Co.', color: 0x2f5d8a, css: '#4f8fd0', off: 5 }];
+const outfits = [];
+function aiUnits() { const out = []; for (const o of outfits) if (o.convoy) { for (const u of [o.convoy.truck, ...o.convoy.guards]) if (u.hp > 0) out.push(u); } return out; }
+function makeOutfits() {
+  if (outfits.length || race.active) return;
+  for (const d of OUTFIT_DEFS) {
+    const slot = (home + d.off) % SLOTS, a = slot * SEG, at = (u, v) => worldOf(slot, u, v);
+    const o = { ...d, slot, stash: rand(4, 8), sold: 0, convoy: null, cool: rand(20, 50), digT: rand(2, 6), angry: 0, meshes: [] };
+    const put = (mesh, [x, z], yaw) => { mesh.position.set(x, hAt(x, z), z); mesh.rotation.y = yaw; scene.add(mesh); o.meshes.push(mesh); return mesh; };
+    put(makePlant(), at(-20, 8), a); put(makeBunkhouse(), at(-26, -20), a + Math.PI);
+    o.ex = put(makeExcavator(), at(-4, -14), a + Math.PI / 2);
+    const flag = new THREE.Group(); add(flag, box(0.25, 5, 0.25), MAT.wood, 0, 2.5, 0); add(flag, box(2, 1.2, 0.08), M(d.color), 1, 4.3, 0); put(flag, at(-32, 6), a);
+    outfits.push(o);
+  }
+  refreshStakes();
+}
+function clearOutfits() {
+  for (const o of outfits) { for (const m of o.meshes) scene.remove(m); if (o.convoy) endConvoy(o); }
+  outfits.length = 0;
+}
+function convoyRoute(o) { return [worldOf(o.slot, -32, -8), worldOf(o.slot, -36, 0), worldOf(o.slot, -98, 0), [Math.sin(o.slot * SEG) * 7, Math.cos(o.slot * SEG) * 7]]; }
+function sendConvoy(o) {
+  const route = convoyRoute(o), [x, z] = route[0];
+  const tmesh = makeSUV(); add(tmesh, box(1.2, 0.5, 1.2), M(o.color), 0, 2.75, -0.35); scene.add(tmesh);
+  const truck = { o, kind: 'truck', x, z, yaw: 0, hp: 150, mesh: tmesh, cargo: o.stash };
+  const guards = [-1, 1, 0].map((side, n) => { const mesh = makeJimbo(o.color, 0x2a1d12); scene.add(mesh); return { o, kind: 'guard', slotSide: side, slotBack: n === 2 ? 7 : 3, x: x + side * 2, z, yaw: 0, hp: 75, mesh, cool: rand(0.5, 1.5), walk: 0, side: 1, strafeT: 0 }; });
+  o.stash = 0;
+  o.convoy = { truck, guards, route, wi: 1, back: false };
+}
+function endConvoy(o) {
+  const c = o.convoy; if (!c) return;
+  for (const u of [c.truck, ...c.guards]) scene.remove(u.mesh);
+  o.convoy = null; o.cool = rand(25, 45);
+}
+function hurtUnit(u, dmg, byOutfit) {
+  if (u.hp <= 0) return;
+  u.hp -= dmg;
+  if (!byOutfit) u.o.angry = 30;
+  puff(dustTex, u.x, hAt(u.x, u.z) + 1.2, u.z, 1, 0.4, 0.3);
+  if (u.hp > 0) return;
+  if (u.kind === 'truck') {
+    u.mesh.rotation.z = 0.5; sfx('boom', u.x, u.z);
+    for (let n = 0; n < 6; n++) puff(smokeTex, u.x + rand(-1, 1), hAt(u.x, u.z) + rand(1, 3), u.z + rand(-1, 1), rand(3, 5), rand(2, 4), 1);
+    if (u.cargo > 0.05) { dropLoot(u.x + 2, u.z, u.cargo); if (!byOutfit) toast(`${u.o.name}'s convoy is down. Its gold spilled: ${u.cargo.toFixed(1)} g in a sack.`, 3200); }
+    u.cargo = 0;
+  } else { u.mesh.rotation.z = Math.PI / 2; if (!byOutfit) { ledger.money += 250; ledger.earned += 250; } }
+}
+function unitTarget(u) {
+  let best = null, bd = 32;
+  for (const v of aiUnits()) { if (v.o === u.o) continue; const d = dist(v.x, v.z, u.x, u.z); if (d < bd) { bd = d; best = v; } }
+  const dj = dist(jim.x, jim.z, u.x, u.z);
+  if (!jim.dead && (dj < 25 || (u.o.angry > 0 && dj < 32)) && dj < bd) { best = 'jim'; bd = dj; }
+  return best ? { t: best, d: bd } : null;
+}
+function outfitTick(dt) {
+  if (!dt) return;
+  for (const o of outfits) {
+    o.angry = Math.max(0, o.angry - dt);
+    o.stash += dt * rand(0.05, 0.09);
+    // their excavator really digs: pits and piles show up on their claim
+    o.digT -= dt;
+    o.ex.userData.house.rotation.y = Math.sin(simTime * 0.8 + o.slot) * 1.2;
+    if (o.digT <= 0) {
+      o.digT = rand(5, 8);
+      const [x, z] = worldOf(o.slot, -4 + rand(-3, 3), -4 + rand(-3, 3)), b = digAt(x, z, 3.5, 1.4);
+      if (b) { const [px, pz] = worldOf(o.slot, 6, -10); deposit(px + rand(-1, 1), pz + rand(-1, 1), b.vol, b.payVol > 0.3 ? 2 : 1); }
+    }
+    if (!o.convoy) { o.cool -= dt; if (o.cool <= 0 && o.stash > 15) sendConvoy(o); continue; }
+    const c = o.convoy, tr = c.truck, alive = c.guards.filter(g => g.hp > 0);
+    const threat = alive.some(g => g.target) || (tr.hp > 0 && unitTarget(tr));
+    // the truck drives the road; it stops while its guards fight
+    if (tr.hp > 0 && !threat) {
+      const [wxp, wzp] = c.route[c.wi], d = dist(tr.x, tr.z, wxp, wzp);
+      if (d < 1.5) {
+        if (c.wi === c.route.length - 1 && !c.back) { tr.o.sold += tr.cargo; tr.cargo = 0; c.back = true; c.route = c.route.slice().reverse(); c.wi = 1; }
+        else if (c.wi === c.route.length - 1 && c.back) { endConvoy(o); continue; }
+        else c.wi++;
+      } else {
+        const want = Math.atan2(wxp - tr.x, wzp - tr.z); tr.yaw = angLerp(tr.yaw, want, Math.min(1, dt * 3));
+        const sp = (alive.length ? 5.5 : 8) * dt; tr.x += Math.sin(tr.yaw) * sp; tr.z += Math.cos(tr.yaw) * sp;
+      }
+    }
+    if (tr.hp > 0) { tr.mesh.position.set(tr.x, hAt(tr.x, tr.z), tr.z); tr.mesh.rotation.y = tr.yaw; }
+    if (tr.hp <= 0 && !alive.length) { c.deadT = (c.deadT || 0) + dt; if (c.deadT > 10) endConvoy(o); continue; }
+    for (const g of c.guards) {
+      if (g.hp <= 0) continue;
+      const tg = unitTarget(g); g.target = tg;
+      if (tg) {
+        const tx = tg.t === 'jim' ? jim.x : tg.t.x, tz = tg.t === 'jim' ? jim.z : tg.t.z;
+        g.yaw = Math.atan2(tx - g.x, tz - g.z);
+        g.strafeT -= dt; if (g.strafeT <= 0) { g.strafeT = rand(0.8, 1.8); g.side = Math.random() < 0.5 ? -1 : 1; }
+        const adv = tg.d > 18 || !clearShot(g.x, g.z, tx, tz) ? 1 : tg.d < 10 ? -0.6 : 0;
+        g.x += (Math.sin(g.yaw) * adv * 4.5 + Math.cos(g.yaw) * g.side * 3) * dt; g.z += (Math.cos(g.yaw) * adv * 4.5 - Math.sin(g.yaw) * g.side * 3) * dt; g.walk += dt * 9;
+        g.cool -= dt;
+        if (g.cool <= 0 && tg.d < 32) {
+          g.cool = rand(0.9, 1.5);
+          const open = clearShot(g.x, g.z, tx, tz), hit = open && Math.random() < hitChance(tg.d, tg.t === 'jim' && sprinting()) * 0.5;
+          sfx('shot', g.x, g.z);
+          tracer(g.x, hAt(g.x, g.z) + 1.6, g.z, tx + (hit ? 0 : rand(-1.5, 1.5)), hAt(tx, tz) + 1.2, tz + (hit ? 0 : rand(-1.5, 1.5)));
+          if (hit) { if (tg.t === 'jim') hurtMe(14, `A ${o.name} guard got you`); else hurtUnit(tg.t, tg.t.kind === 'truck' ? 10 : 14, o); }
+        }
+      } else {
+        // keep formation around the truck (or walk home if it is gone)
+        const anchor = tr.hp > 0 ? tr : { x: c.route[0][0], z: c.route[0][1], yaw: Math.atan2(c.route[0][0] - g.x, c.route[0][1] - g.z) };
+        const sx = anchor.x - Math.sin(anchor.yaw) * g.slotBack + Math.cos(anchor.yaw) * g.slotSide * 2.6, sz = anchor.z - Math.cos(anchor.yaw) * g.slotBack - Math.sin(anchor.yaw) * g.slotSide * 2.6;
+        const d = dist(sx, sz, g.x, g.z);
+        if (d > 0.4) { g.yaw = Math.atan2(sx - g.x, sz - g.z); const sp = Math.min(d, 7 * dt); g.x += Math.sin(g.yaw) * sp; g.z += Math.cos(g.yaw) * sp; g.walk += dt * 9; }
+      }
+      pushOut(g, 0.5);
+      g.mesh.position.set(g.x, hAt(g.x, g.z), g.z); g.mesh.rotation.y = g.yaw;
+      const legs = g.mesh.userData.legs; legs[0].rotation.x = Math.sin(g.walk) * 0.5; legs[1].rotation.x = -legs[0].rotation.x;
+    }
+  }
+}
+
 // =============================================================== loop
 function syncMeshes(dt) {
   for (const m of machines) {
@@ -2344,6 +2471,7 @@ function frame(now) {
   updateEffects(real * sc);
   ghostTick(real);
   combatTick(sc > 0 ? real : 0);
+  outfitTick(sc > 0 ? real * sc : 0);
   netT -= real;
   if (netT <= 0) { netT = 0.16; if (race.active) { netTick(); pushPresence(); } }
   flushTerrain();
@@ -2363,9 +2491,10 @@ function resize() { renderer.setSize(glCanvas.clientWidth, glCanvas.clientHeight
 window.addEventListener('resize', resize);
 
 setupClaim();
+makeOutfits();
 bakeMini();
 for (const s of structures) if (s.kind === 'pump') s.wetOK = waterNear(s.x, s.z, 9) > 0;
-window.__claim = { machines, structures, piles, ledger, T, digAt, jim, TOWN, worldOf, ghosts, H, I: (x, z) => I(Math.round(gx(x)), Math.round(gx(z))), get home() { return home; }, foes, loots, hurtMe, toScreen, aim, paytop: k => PAYTOP[k], setBanditT: v => { banditT = v; } };
+window.__claim = { machines, structures, piles, ledger, T, digAt, jim, TOWN, worldOf, ghosts, H, I: (x, z) => I(Math.round(gx(x)), Math.round(gx(z))), get home() { return home; }, foes, loots, hurtMe, toScreen, aim, paytop: k => PAYTOP[k], outfits, sendConvoy, setBanditT: v => { banditT = v; } };
 resize();
 renderStats();
 refreshCmd();

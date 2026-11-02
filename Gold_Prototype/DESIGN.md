@@ -111,3 +111,14 @@ Jimbo is the hero unit. Abilities reuse terrain physics, matching the laptop ses
   Lifting the blade dumps the load. That pushes overburden, fills pits and builds ramps.
 - JJ: dozing should never destroy gold. The blade cuts no deeper than the top of the pay gravel and never
   pushes pay piles; it strips overburden and moves waste/fill only (that is also how real placer mines use dozers).
+
+## v10: rival outfits and convoys (solo)
+
+- Two AI outfits (McCready Outfit, Dutch Hollow Co.) hold claims 3 and 5 slots around from yours. Their
+  excavators really dig (pits and piles appear), and they bank 0.05 to 0.09 g per second.
+- With more than 15 g banked they send a convoy: a 4x4 (150 health) plus 3 hired guards (75 health each)
+  up their road to town; the truck sells and drives home. The truck stops while its guards fight.
+- Guards shoot rival convoys on sight and you within 25 m (32 m once you have attacked that outfit).
+- Wreck a truck and its gold spills as a sack. $250 per guard. Rivals appear on the scoreboard and minimap.
+- Solo only for now; a shared race needs one player to host the AI and stream it.
+- Next: let players hire the same kind of guard squads at the saloon.
