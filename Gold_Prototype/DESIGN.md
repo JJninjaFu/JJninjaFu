@@ -102,3 +102,11 @@ Jimbo is the hero unit. Abilities reuse terrain physics, matching the laptop ses
   Teammates can ride in the back (X next to it) and shoot while their buddy drives.
 - Bandits strafe, shoot from 32 m, and fire faster.
 - Later: hire employees to run gold routes in the 4x4 (and protect them).
+
+## v8: bulldozer
+
+- In the starting kit and the shop ($16,000). Drive it yourself; Space drops or lifts the blade.
+- Blade down while moving: cuts ground that sits above the tracks (8 cm below them, never past bedrock),
+  carries up to 6 m³, fills ground that dips below the tracks from that load, spills extra ahead as a pile.
+  Lifting the blade dumps the load. That pushes overburden, fills pits and builds ramps.
+- Dozed material becomes waste: gold in pay gravel you doze is lost (let the excavator handle pay dirt).

@@ -187,7 +187,7 @@ const T = Object.assign({}, DEFAULT_T);
 const STORE_KEY = 'bedrockClaim.tune.v1';
 try { Object.assign(T, JSON.parse(localStorage.getItem(STORE_KEY) || '{}')); } catch (e) { /* storage unavailable */ }
 function saveTune() { try { localStorage.setItem(STORE_KEY, JSON.stringify(T)); } catch (e) { /* ignore */ } }
-const PRICES = { excavator: 14000, loader: 6000, pump: 2500, generator: 8000, plant: 18000, bunkhouse: 5000, survey: 1500, hire: 600 };
+const PRICES = { excavator: 14000, dozer: 16000, loader: 6000, pump: 2500, generator: 8000, plant: 18000, bunkhouse: 5000, survey: 1500, hire: 600 };
 
 // =============================================================== ground: surface, overburden, pay gravel, bedrock
 const SIZE = 400, N = 321, CELL = SIZE / (N - 1), HALF = SIZE / 2, NN = N * N, WATER_Y = -1.4;
@@ -515,6 +515,20 @@ function makeLoader() {
   g.userData = { arms, load };
   return g;
 }
+function makeDozer() {
+  const g = new THREE.Group();
+  add(g, box(0.75, 0.85, 3.6), MAT.dark, 1.15, 0.43, -0.2); add(g, box(0.75, 0.85, 3.6), MAT.dark, -1.15, 0.43, -0.2);
+  add(g, box(1.8, 1.0, 3.0), MAT.yel, 0, 1.25, -0.4);
+  add(g, box(1.5, 1.2, 1.3), MAT.glass, 0, 2.3, -0.9);
+  add(g, box(1.7, 0.12, 1.5), MAT.yel, 0, 2.95, -0.9);
+  add(g, cyl(0.1, 0.1, 1.0, 8), MAT.dark, 0.5, 2.3, 0.6);
+  for (const x of [-1.25, 1.25]) add(g, box(0.15, 0.2, 1.6), MAT.yel, x, 0.9, 1.4);
+  const blade = new THREE.Group(); blade.position.set(0, 0.7, 2.3); g.add(blade);
+  add(blade, box(3.4, 1.1, 0.25), MAT.yel, 0, 0.3, 0); add(blade, box(3.4, 0.12, 0.35), MAT.steel, 0, -0.22, 0.05);
+  const load = add(blade, box(2.8, 0.6, 0.8), MAT.dirt, 0, 0.1, 0.55); load.visible = false;
+  g.userData = { blade, load, wheels: [] };
+  return g;
+}
 function makeSUV() {
   const g = new THREE.Group(), tan = M(0xc4a86e), wheels = [];
   add(g, box(2.2, 0.9, 4.0), tan, 0, 1.1, 0);
@@ -617,14 +631,14 @@ class Pile {
   take(v) { v = Math.min(v, this.vol); const g = this.vol > 0 ? this.gold * v / this.vol : 0; this.vol -= v; this.gold -= g; takeLoose(this.x, this.z, v, this.code); return [v, g]; }
 }
 function pileAt(kind, x, z) { return piles.find(p => p.kind === kind && dist(p.x, p.z, x, z) < 4) || new Pile(kind, x, z); }
-const MTYPE = { excavator: { name: 'Excavator', speed: 1.8, slope: 0.55 }, loader: { name: 'Loader', speed: 5, slope: 0.6 }, suv: { name: 'Crew 4x4', speed: 9, slope: 0.6 } };
+const MTYPE = { excavator: { name: 'Excavator', speed: 1.8, slope: 0.55 }, loader: { name: 'Loader', speed: 5, slope: 0.6 }, suv: { name: 'Crew 4x4', speed: 9, slope: 0.6 }, dozer: { name: 'Dozer', speed: 2.4, slope: 0.6 } };
 class Machine {
   constructor(type, x, z, heading = 0) {
     this.id = ID++; this.type = type; this.M = MTYPE[type]; this.x = x; this.z = z; this.y = hAt(x, z); this.heading = heading;
     this.path = null; this.pathI = 0; this.goal = null; this.order = null; this.state = 'Idle'; this.crewed = false; this.moving = false;
     this.cargo = 0; this.cargoGold = 0; this.timer = 0; this.auto = type === 'loader'; this.swing = 0; this.boom = -0.3; this.stick = 0.4; this.bucketFull = false;
     this.speed = 0; this.manualT = -1;
-    this.mesh = type === 'excavator' ? makeExcavator() : type === 'suv' ? makeSUV() : makeLoader();
+    this.mesh = type === 'excavator' ? makeExcavator() : type === 'suv' ? makeSUV() : type === 'dozer' ? makeDozer() : makeLoader();
     this.mesh.traverse(o => { o.userData.ent = this; });
     scene.add(this.mesh); machines.push(this);
   }
@@ -659,6 +673,7 @@ function setupClaim() {
   new Machine('excavator', ...at(-4, -14), a);
   new Machine('loader', ...at(-12, -2), a);
   new Machine('suv', ...at(-32, -6), a + Math.PI);
+  new Machine('dozer', ...at(-10, 18), a);
   const [jx, jz] = at(-30, -11);
   Object.assign(jim, { x: jx, z: jz, yaw: a, driving: null });
   cam.x = jx; cam.z = jz; cam.yaw = a + Math.PI * 1.25;
@@ -1116,7 +1131,7 @@ function buildCmd(info, cmds) {
   if (sel instanceof Machine) {
     const m = sel;
     info.innerHTML = `<b>${m.name}</b> · ${m.crewed ? 'operator on board' : 'no operator, hire more crew'}<br><span class="st">${m.state}${m.type === 'loader' && m.only ? ' · hauling from one chosen pile' : ''}</span>`;
-    if (m.type === 'suv') cmds.append(btn('Take the wheel', () => takeWheel(m), 'on'));
+    if (m.type === 'suv' || m.type === 'dozer') cmds.append(btn('Take the wheel', () => takeWheel(m), 'on'));
     else if (m.type === 'excavator') cmds.append(btn('Dig here', () => setTool('dig')), btn('Stop', () => { m.order = null; refreshCmd(); }), btn('Take the wheel', () => takeWheel(m)));
     else cmds.append(btn('Take the wheel', () => takeWheel(m)), btn(m.auto ? 'Auto-haul: on' : 'Auto-haul: off', () => { m.auto = !m.auto; m.order = null; m.job = null; m.only = null; refreshCmd(); }, m.auto ? 'on' : ''), btn('Haul from any pile', () => { m.only = null; m.auto = true; m.order = null; m.job = null; refreshCmd(); }));
     cmds.append(btn('Deselect', () => select(null)));
@@ -1206,6 +1221,7 @@ function renderDrawer() {
     $('#drawerTitle').textContent = 'Equipment dealer';
     body.append(p(`You have ${money(ledger.money)}. Machines arrive at the dealer in town and drive down to your claim. Buildings: tap to place.`), h3('Machines'),
       shopItem('Excavator', PRICES.excavator, 'Digs a site layer by layer and sorts waste from pay dirt.', () => deliver('excavator')),
+      shopItem('Dozer', PRICES.dozer, 'Pushes dirt with its blade: clears overburden, fills pits, builds ramps. Drive it yourself.', () => deliver('dozer')),
       shopItem('Loader', PRICES.loader, 'Hauls pay dirt from piles to the wash plant hopper.', () => deliver('loader')),
       h3('Buildings'),
       shopItem('Water pump', PRICES.pump, 'Place within 9 m of water. 60 water units.', () => setTool('build:pump')),
@@ -1392,8 +1408,9 @@ const jim = { x: -19, z: 14, yaw: Math.PI, walk: 0, driving: null, mesh: makeJim
 scene.add(jim.mesh);
 let view = 'drive';
 const pressed = new Set(), touchIn = { lx: 0, ly: 0, swing: 0, on: false };
-const DRIVE = { suv: { max: 11, acc: 7, brake: 11, turn: 2.0, tracked: false, r: 2.0 }, loader: { max: 6, acc: 6, brake: 9, turn: 1.8, tracked: false, r: 1.9 }, excavator: { max: 2.6, acc: 3, brake: 6, turn: 1.0, tracked: true, r: 2.4 } };
+const DRIVE = { suv: { max: 11, acc: 7, brake: 11, turn: 2.0, tracked: false, r: 2.0 }, loader: { max: 6, acc: 6, brake: 9, turn: 1.8, tracked: false, r: 1.9 }, excavator: { max: 2.6, acc: 3, brake: 6, turn: 1.0, tracked: true, r: 2.4 }, dozer: { max: 3.4, acc: 3.5, brake: 7, turn: 1.1, tracked: true, r: 2.3 } };
 const DRIVE_HELP = {
+  dozer: 'WASD drives. Space drops or lifts the blade. Blade down cuts the ground ahead and carries the dirt; drive over a hole or down a slope to fill it, and build ramps. Lifting the blade dumps the load. Careful: pay gravel you doze loses its gold.',
   suv: 'WASD or the stick drives. Take the hill road to town to sell gold. Space honks.',
   excavator: 'WASD drives the tracks, Q/E (or ◀ ▶) swings, Space digs and dumps. Dumps sort themselves into pay dirt or waste piles. Dump next to the wash plant to fill its hopper.',
   loader: 'Space scoops from a pile in front of you, then dumps. Dump at the wash plant to feed the hopper.',
@@ -1500,8 +1517,40 @@ function driveMachine(m, inp, dt) {
 const hintT = {};
 function hintOnce(key, text) { const now = performance.now(); if ((hintT[key] || 0) > now) return; hintT[key] = now + 4000; toast(text, 2600); }
 function tip(m, reach) { const a = m.heading + m.swing; return [m.x + Math.sin(a) * reach, m.z + Math.cos(a) * reach]; }
+// the blade: cut what sticks up above the tracks, carry it, fill what dips below, spill the excess ahead
+function manualDozer(m, inp, dt) {
+  const fx = Math.sin(m.heading), fz = Math.cos(m.heading), rx = fz, rz = -fx;
+  m.load = m.load || 0;
+  if (inp.action) {
+    m.bladeDown = !m.bladeDown; sfx('click', m.x, m.z);
+    if (!m.bladeDown && m.load > 0.1) { deposit(m.x + fx * 3.2, m.z + fz * 3.2, m.load, 1); m.load = 0; sfx('dump', m.x, m.z); }
+  }
+  m.boom = m.bladeDown ? 1 : 0;
+  m.state = m.bladeDown ? `Blade down · ${m.load.toFixed(1)} m³ on the blade` : 'Blade up';
+  if (m.moving) spend(T.fuelExc * dt);
+  if (!m.bladeDown || m.speed < 0.15) return;
+  const base = hAt(m.x, m.z) - 0.08, stepLen = m.speed * dt, cellA = CELL * CELL, done = new Set();
+  for (let sd = -1.6; sd <= 1.61; sd += CELL * 0.7) {
+    const [i, j] = cellOf(m.x + fx * 2.7 + rx * sd, m.z + fz * 2.7 + rz * sd);
+    if (i < 1 || j < 1 || i > N - 2 || j > N - 2) continue;
+    const k = I(i, j);
+    if (done.has(k)) continue;
+    done.add(k);
+    if (H[k] > base) {
+      const cut = Math.min(H[k] - Math.max(base, BEDR[k]), 0.6 * stepLen);
+      if (cut > 0) { H[k] -= cut; loose[k] = Math.max(0, loose[k] - cut); m.load += cut * cellA; }
+    } else if (m.load > 0.01) {
+      const fill = Math.min(base - H[k], 0.6 * stepLen, m.load / cellA);
+      H[k] += fill; loose[k] += fill; looseKind[k] = 1; m.load -= fill * cellA;
+    }
+  }
+  if (m.load > 6) { deposit(m.x + fx * 4, m.z + fz * 4, m.load - 6, 1); m.load = 6; }
+  const [i0, j0, i1, j1] = cellBox(m.x + fx * 2.7, m.z + fz * 2.7, 2.2);
+  markDirty(i0, j0, i1, j1);
+  if (Math.random() < dt * 6) puff(dustTex, m.x + fx * 3, hAt(m.x, m.z) + 0.6, m.z + fz * 3, 2.5, 1.2, 0.5);
+}
 function nearPlant(x, z, r) { return structures.find(s => s.kind === 'plant' && dist(x, z, s.x, s.z) < s.S.r + r); }
-function actLabel(m) { return m.type === 'excavator' ? (m.bucketFull ? 'Dump' : 'Dig') : m.type === 'loader' ? (m.cargo > 0 ? 'Dump' : 'Scoop') : 'Honk'; }
+function actLabel(m) { return m.type === 'dozer' ? (m.bladeDown ? 'Blade up' : 'Blade down') : m.type === 'excavator' ? (m.bucketFull ? 'Dump' : 'Dig') : m.type === 'loader' ? (m.cargo > 0 ? 'Dump' : 'Scoop') : 'Honk'; }
 function dropLoad(x, z, vol, gold, kind) {
   const pl = nearPlant(x, z, 3.5);
   if (pl && kind === 'pay') { pl.hopper += vol; pl.hopperGold += gold; sfx('dump', pl.x, pl.z); toast(`Into the hopper: ${vol.toFixed(1)} m³ of pay dirt.`, 1600); return; }
@@ -1579,6 +1628,7 @@ function updatePlayer(dt, live) {
     m.y = hAt(m.x, m.z);
     if (m.type === 'excavator') manualExcavator(m, inp, dt);
     else if (m.type === 'loader') { manualLoader(m, inp); m.state = 'You are driving'; if (m.moving) spend(T.fuelLoader * dt); }
+    else if (m.type === 'dozer') manualDozer(m, inp, dt);
     else { m.state = m.cargoGold > 0.05 ? `Hauling ${m.cargoGold.toFixed(0)} lb` : 'You are driving'; if (inp.action) { if (nearPlant(m.x, m.z, 6) && ledger.goldSafe > 0.05) { m.cargoGold += ledger.goldSafe; toast(`Loaded ${ledger.goldSafe.toFixed(1)} g (${ledger.goldSafe.toFixed(0)} lb of concentrate) into the 4x4.`, 2400); ledger.goldSafe = 0; sfx('dump', m.x, m.z); } else sfx('horn', m.x, m.z); } }
     if (m.type === 'excavator' && m.moving) spend(T.fuelExc * dt);
     jim.x = m.x; jim.z = m.z;
@@ -1904,7 +1954,7 @@ function worldState() {
   const w = {
     h: home,
     j: [r1(jim.x), r1(jim.z), r2(jim.yaw), jim.driving ? machines.indexOf(jim.driving) : jim.ride ? -2 : -1],
-    m: machines.slice(0, 20).map(m => [m.type, r1(m.x), r1(m.z), r2(m.heading), r2(m.swing || 0), r2(m.boom || 0), m.bucketFull || m.cargo > 0 || m.cargoGold > 0.05 ? 1 : 0]),
+    m: machines.slice(0, 20).map(m => [m.type, r1(m.x), r1(m.z), r2(m.heading), r2(m.swing || 0), r2(m.boom || 0), m.bucketFull || m.cargo > 0 || m.cargoGold > 0.05 || (m.load || 0) > 0.3 ? 1 : 0]),
     s: structures.slice(0, 16).map(st => [st.kind, r1(st.x), r1(st.z), r2(st.heading)]),
   };
   if (netChunk) w.t = netChunk;
@@ -1925,7 +1975,7 @@ function applyPatch(t) {
   }
   applyingRemote = false;
 }
-const MAKERS = { excavator: makeExcavator, loader: makeLoader, suv: makeSUV };
+const MAKERS = { excavator: makeExcavator, loader: makeLoader, suv: makeSUV, dozer: makeDozer };
 const SMAKERS = { plant: makePlant, generator: makeGenerator, pump: makePump, bunkhouse: makeBunkhouse };
 function dropGhost(peer) {
   const g = ghosts.get(peer);
@@ -1980,6 +2030,7 @@ function ghostTick(dt) {
       const u = m.mesh.userData;
       if (m.type === 'excavator') { u.house.rotation.y = angLerp(u.house.rotation.y, m.sw, k); u.boom.rotation.x = m.bm; u.load.visible = m.load; }
       else if (m.type === 'loader') { u.arms.rotation.x = m.load ? -0.45 : 0.15; u.load.visible = m.load; }
+      else if (m.type === 'dozer') { u.blade.position.y = m.bm > 0 ? 0.35 : 0.85; u.load.visible = m.load; }
     }
     if (g.jd >= 0 && g.ms[g.jd]) { g.jx = g.ms[g.jd].x; g.jz = g.ms[g.jd].z; }
   }
@@ -2267,6 +2318,7 @@ function syncMeshes(dt) {
     const u = m.mesh.userData;
     if (m.type === 'excavator') { u.house.rotation.y = m.swing; u.boom.rotation.x = m.boom; u.stick.rotation.x = m.stick; u.load.visible = !!m.bucketFull; }
     else if (m.type === 'loader') { u.arms.rotation.x = m.cargo > 0 ? -0.45 : 0.15; u.load.visible = m.cargo > 0; }
+    else if (m.type === 'dozer') { u.blade.position.y = m.bladeDown ? 0.35 : 0.85; u.load.visible = (m.load || 0) > 0.3; }
     else { m.spin = (m.spin || 0) + (m.speed || 0) * dt / 0.6; for (const w of u.wheels) w.rotation.x = m.spin; }
   }
   for (const s of structures) if (s.kind === 'plant' && s.running) s.mesh.userData.trommel.rotation.y += dt * 2.5;
